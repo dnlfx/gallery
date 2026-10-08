@@ -19,5 +19,12 @@
     <string name="viewer_volume">Volume</string>
     <string name="viewer_skip_back">−%1$d s</string>
     <string name="viewer_skip_forward">+%1$d s</string>
+    <string name="viewer_seek_bar">Playback position</string>
+    <string name="viewer_seek_position">%1$s of %2$s</string>
+    <string name="viewer_a11y_skip_back">Back 10 seconds</string>
+    <string name="viewer_a11y_skip_forward">Forward 10 seconds</string>
+    <string name="viewer_a11y_volume_up">Volume up</string>
+    <string name="viewer_a11y_volume_down">Volume down</string>
+    <string name="viewer_a11y_toggle_controls">Show or hide controls</string>
     <string name="viewer_video_error">This phone can\'t play this video</string>
 </resources>

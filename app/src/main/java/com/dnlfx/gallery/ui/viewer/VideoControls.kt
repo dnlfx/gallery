@@ -43,6 +43,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dnlfx.gallery.R
@@ -204,10 +210,27 @@ private fun ThinSeekBar(
     val start by rememberUpdatedState(onSeekStart)
     val end by rememberUpdatedState(onSeekEnd)
     val fraction = dragFraction ?: progressFraction(positionMillis, durationMillis)
+    val label = stringResource(R.string.viewer_seek_bar)
+    val position = stringResource(
+        R.string.viewer_seek_position,
+        formatDuration(positionMillis),
+        formatDuration(durationMillis),
+    )
 
     Canvas(
         modifier
             .height(32.dp)
+            // Screen readers announce the time and can move it, by default 5% of the video per step.
+            .semantics {
+                contentDescription = label
+                stateDescription = position
+                progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f)
+                setProgress { target ->
+                    val known = duration > 0L
+                    if (known) seek((target.coerceIn(0f, 1f) * duration).toLong())
+                    known
+                }
+            }
             .pointerInput(Unit) {
                 detectTapGestures { tap ->
                     val f = (tap.x / size.width).coerceIn(0f, 1f)
