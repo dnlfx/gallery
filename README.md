@@ -54,10 +54,17 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
 - `thumbnail/` Coil fetcher that uses the system thumbnail cache (handles any format the
   platform can decode).
 - `ui/permission/` Photos and videos permission, including Android 14's "selected photos" mode.
-- `ui/grid/` The all-media grid, with a fast-scroll thumb on the right edge for big libraries.
+- `ui/grid/` The all-media grid, grouped under month headers, with a fast-scroll thumb on the right
+  edge for big libraries. Pinch to switch between about 3, 4, 6 and 8 columns; the choice is kept.
 
 - `ui/viewer/` Full-screen viewer: swipe between items in grid order, pinch or double-tap to
-  zoom photos, Media3 video playback.
+  zoom photos, swipe a photo down to close, Media3 video playback. The top bar has details (dates,
+  folder, resolution, size) and a trash button (Android 11+), which moves the item to the system
+  trash after the system's own confirmation, recoverable for 30 days.
+
+Other apps (Files, Messages, the camera) can open a photo or video in Gallery. One that's in the
+library opens among its neighbours; anything else opens on its own, without needing the photos
+permission.
 
 ## Formats
 

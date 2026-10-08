@@ -6,19 +6,26 @@ import androidx.lifecycle.viewModelScope
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaRepository
 import com.dnlfx.gallery.ui.permission.MediaAccess
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 
 sealed interface GridState {
     data object Loading : GridState
-    data class Loaded(val items: List<MediaItem>) : GridState
+    data class Loaded(
+        val items: List<MediaItem>,
+        val sections: GridSections = GridSections.Empty,
+        /** The access level the library was read with. */
+        val access: MediaAccess = MediaAccess.NONE,
+    ) : GridState
 }
 
 class GridViewModel(application: Application) : AndroidViewModel(application) {
@@ -34,7 +41,10 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
                 flowOf(GridState.Loaded(emptyList()))
             } else {
                 repository.observeMedia()
-                    .map<List<MediaItem>, GridState> { GridState.Loaded(it) }
+                    .map<List<MediaItem>, GridState> { items ->
+                        GridState.Loaded(items, buildGridSections(items.map { it.dateModifiedSeconds }), level)
+                    }
+                    .flowOn(Dispatchers.Default)
                     .onStart { emit(GridState.Loading) }
             }
         }

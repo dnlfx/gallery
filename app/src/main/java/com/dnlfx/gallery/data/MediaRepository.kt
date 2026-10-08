@@ -66,6 +66,7 @@ class MediaRepository(context: Context) {
             MediaStore.MediaColumns.HEIGHT,
             MediaStore.MediaColumns.ORIENTATION,
             MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.RELATIVE_PATH,
         )
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
         val selectionArgs = arrayOf(
@@ -91,6 +92,7 @@ class MediaRepository(context: Context) {
         val heightCol = getColumnIndexOrThrow(MediaStore.MediaColumns.HEIGHT)
         val orientationCol = getColumnIndexOrThrow(MediaStore.MediaColumns.ORIENTATION)
         val sizeCol = getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+        val pathCol = getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
 
         val items = ArrayList<MediaItem>(count)
         while (moveToNext()) {
@@ -109,6 +111,7 @@ class MediaRepository(context: Context) {
                 height = getInt(heightCol),
                 orientationDegrees = ((getInt(orientationCol) % 360) + 360) % 360,
                 sizeBytes = getLong(sizeCol),
+                relativePath = getStringOrNull(pathCol),
             )
         }
         return items

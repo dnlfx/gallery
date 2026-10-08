@@ -1,5 +1,6 @@
 package com.dnlfx.gallery.ui.grid
 
+import android.content.Context
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,7 +12,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -32,13 +32,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
 import com.dnlfx.gallery.thumbnail.MediaThumbnail
+import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,19 +58,26 @@ fun MediaGridScreen(
     limitedAccess: Boolean,
     onRequestFullAccess: () -> Unit,
     onItemClick: (index: Int, item: MediaItem) -> Unit,
+    modifier: Modifier = Modifier,
     gridState: LazyGridState = rememberLazyGridState(),
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    val resources = LocalContext.current.resources
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text(stringResource(R.string.app_name))
                         if (state is GridState.Loaded && state.items.isNotEmpty()) {
+                            val count = state.items.size
                             Text(
-                                text = stringResource(R.string.item_count, state.items.size),
+                                text = resources.getQuantityString(
+                                    R.plurals.item_count,
+                                    count,
+                                    NumberFormat.getIntegerInstance().format(count),
+                                ),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -83,16 +98,18 @@ fun MediaGridScreen(
                 }
             } else {
                 val media = state.items
-                val headerCount = if (limitedAccess) 1 else 0
+                val entries = state.sections.entries
+                val bannerCount = if (limitedAccess) 1 else 0
                 val monthFormat = remember {
                     val locale = Locale.getDefault()
                     SimpleDateFormat(DateFormat.getBestDateTimePattern(locale, "MMMMyyyy"), locale)
                 }
-                Box(Modifier.fillMaxSize()) {
+                val level = rememberGridLevel()
+                Box(Modifier.fillMaxSize().pinchToResize(level)) {
                     LazyVerticalGrid(
                         state = gridState,
-                        // About four columns on a phone held upright, more in landscape.
-                        columns = GridCells.Adaptive(minSize = 88.dp),
+                        // Four columns on a phone held upright by default; pinch for 3, 6 or 8.
+                        columns = gridCellsFor(level.intValue),
                         contentPadding = padding,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -103,17 +120,39 @@ fun MediaGridScreen(
                                 LimitedAccessBanner(onRequestFullAccess)
                             }
                         }
-                        items(count = media.size, key = { media[it].id }, contentType = { "media" }) { index ->
-                            val item = media[index]
-                            MediaCell(item = item, onClick = { onItemClick(index, item) })
+                        items(
+                            count = entries.size,
+                            key = { index ->
+                                when (val entry = entries[index]) {
+                                    is GridEntry.Header -> "month-${entry.month}"
+                                    is GridEntry.Media -> media[entry.mediaIndex].id
+                                }
+                            },
+                            span = { index ->
+                                if (entries[index] is GridEntry.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1)
+                            },
+                            contentType = { index -> if (entries[index] is GridEntry.Header) "month" else "media" },
+                        ) { index ->
+                            when (val entry = entries[index]) {
+                                is GridEntry.Header -> MonthHeader(
+                                    remember(entry.month) { monthFormat.format(Date(entry.millis)) },
+                                )
+                                is GridEntry.Media -> {
+                                    val item = media[entry.mediaIndex]
+                                    MediaCell(item = item, onClick = { onItemClick(entry.mediaIndex, item) })
+                                }
+                            }
                         }
                     }
                     FastScroller(
                         gridState = gridState,
                         labelFor = { index ->
-                            media.getOrNull(index - headerCount)?.let {
-                                monthFormat.format(Date(it.dateModifiedSeconds * 1000))
+                            val millis = when (val entry = entries.getOrNull(index - bannerCount)) {
+                                is GridEntry.Header -> entry.millis
+                                is GridEntry.Media -> media.getOrNull(entry.mediaIndex)?.let { it.dateModifiedSeconds * 1000 }
+                                null -> null
                             }
+                            millis?.let { monthFormat.format(Date(it)) }
                         },
                         contentPadding = padding,
                     )
@@ -124,16 +163,39 @@ fun MediaGridScreen(
 }
 
 @Composable
+private fun MonthHeader(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 8.dp)
+            .semantics { heading() },
+    )
+}
+
+@Composable
 private fun MediaCell(item: MediaItem, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val description = remember(item) { mediaDescription(context, item) }
+    val request = remember(item.uri, item.dateModifiedSeconds) {
+        ImageRequest.Builder(context)
+            .data(MediaThumbnail(item.uri, item.dateModifiedSeconds))
+            // Only thumbnails decoded fresh fade in; ones already in memory appear at once.
+            .crossfade(CROSSFADE_MILLIS)
+            .build()
+    }
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
     ) {
         AsyncImage(
-            model = MediaThumbnail(item.uri, item.dateModifiedSeconds),
-            contentDescription = item.displayName,
+            model = request,
+            contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
@@ -144,11 +206,30 @@ private fun MediaCell(item: MediaItem, onClick: () -> Unit) {
                 style = MaterialTheme.typography.labelSmall.copy(
                     shadow = Shadow(color = Color.Black.copy(alpha = 0.7f), blurRadius = 4f),
                 ),
-                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+                    .clearAndSetSemantics {},
             )
         }
     }
 }
+
+/** What TalkBack reads for a cell: "Photo, 1 October 2026" or "Video, 0:32, 1 October 2026". */
+private fun mediaDescription(context: Context, item: MediaItem): String {
+    val date = java.text.DateFormat.getDateInstance(java.text.DateFormat.LONG)
+        .format(Date(item.dateModifiedSeconds * 1000))
+    return when (item.type) {
+        MediaType.IMAGE -> context.getString(R.string.cell_photo, date)
+        MediaType.VIDEO -> context.getString(
+            R.string.cell_video,
+            formatDuration(item.durationMillis ?: 0L),
+            date,
+        )
+    }
+}
+
+private const val CROSSFADE_MILLIS = 150
 
 @Composable
 private fun LimitedAccessBanner(onRequestFullAccess: () -> Unit) {
