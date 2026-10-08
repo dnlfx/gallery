@@ -15,8 +15,7 @@ import androidx.media3.exoplayer.SeekParameters
  * takes longer than the gap between touch events. Queuing a seek per event left the player working
  * through a backlog long after the finger let go, so the video sat frozen. Here only one seek is
  * in flight at a time: newer targets replace the waiting one, and the next goes out as soon as
- * the player has a frame. Moves land on the nearest keyframe, which decodes fast; [finish] lands
- * on the exact frame and resumes playback if it was playing.
+ * the player has a frame. [finish] lands on the exact frame and resumes playback if it was playing.
  */
 class Scrubber(private val player: ExoPlayer) {
     var active = false
@@ -44,7 +43,9 @@ class Scrubber(private val player: ExoPlayer) {
         // A finished video stays paused after scrubbing back, like it was before.
         resume = player.playWhenReady && player.playbackState != Player.STATE_ENDED
         player.pause()
-        player.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+        player.setSeekParameters(
+            if (scrubsExactly(player.duration)) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC,
+        )
     }
 
     fun moveTo(positionMillis: Long) {
