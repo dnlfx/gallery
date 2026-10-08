@@ -20,16 +20,36 @@ class VideoGestureMathTest {
     }
 
     @Test
-    fun shortClipsSpanTheWholeScreen() {
-        // A 30 second clip: sliding half the width moves 15 seconds.
-        assertEquals(20_000L, scrubTarget(5_000, 450f, 900f, 30_000))
-        assertEquals(0L, scrubTarget(5_000, -900f, 900f, 30_000))
+    fun shortClipsTakeTwoScreenWidthsToCross() {
+        // A 20 second clip at a careful pace: 400dp, about one portrait screen width, moves 10 seconds.
+        assertEquals(25f, scrubMillisPerDp(20_000), 0.001f)
+        assertEquals(15_000f, scrubStep(5_000f, 400f, 100f, 20_000), 0.5f)
     }
 
     @Test
-    fun longVideosCapTheScrubSpan() {
-        // A one hour video: sliding the full width moves two minutes, not the whole hour.
-        assertEquals(130_000L, scrubTarget(10_000, 900f, 900f, 3_600_000))
+    fun longVideosCapTheScrubRate() {
+        // A one hour video: a careful 400dp slide moves 100 seconds, not a quarter of the hour.
+        assertEquals(250f, scrubMillisPerDp(3_600_000), 0.001f)
+        assertEquals(110_000f, scrubStep(10_000f, 400f, 100f, 3_600_000), 0.5f)
+        // Unknown length scrubs at the long-video rate.
+        assertEquals(250f, scrubMillisPerDp(0), 0.001f)
+    }
+
+    @Test
+    fun fasterSlidesCoverMoreGround() {
+        assertEquals(1f, scrubGain(0f), 0.0001f)
+        assertEquals(1f, scrubGain(400f), 0.0001f)
+        assertEquals(2f, scrubGain(1_450f), 0.0001f)
+        assertEquals(3f, scrubGain(2_500f), 0.0001f)
+        assertEquals(3f, scrubGain(10_000f), 0.0001f)
+    }
+
+    @Test
+    fun scrubStepsStayInsideTheVideo() {
+        assertEquals(0f, scrubStep(1_000f, -500f, 100f, 20_000), 0.0001f)
+        assertEquals(20_000f, scrubStep(19_000f, 500f, 100f, 20_000), 0.0001f)
+        // Sliding back from the end responds straight away instead of unwinding an overshoot.
+        assertEquals(19_750f, scrubStep(20_000f, -10f, 100f, 20_000), 0.5f)
     }
 
     @Test

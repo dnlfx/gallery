@@ -131,6 +131,7 @@ fun ViewerScreen(
     DisposableEffect(player) { onDispose { player.release() } }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
     val playback = rememberPlaybackState(player)
+    val scrubber = rememberScrubber(player)
 
     // Chosen speed carries over from one video to the next until the viewer is closed.
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
@@ -197,6 +198,7 @@ fun ViewerScreen(
                     VideoPage(
                         item = item,
                         player = player,
+                        scrubber = scrubber,
                         playback = playback,
                         onToggleControls = { controlsVisible = !controlsVisible },
                         onInteraction = { interactions++ },
@@ -257,7 +259,6 @@ fun ViewerScreen(
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                var resumeAfterSeek by remember { mutableStateOf(false) }
                 val page = pagerState.settledPage
                 VideoBottomBar(
                     playback = playback,
@@ -266,15 +267,18 @@ fun ViewerScreen(
                         speed = it
                         interactions++
                     },
-                    onSeek = { player.seekTo(clampPosition(it, playback.durationMillis)) },
+                    onSeek = {
+                        val target = clampPosition(it, playback.durationMillis)
+                        // A drag along the bar previews like a sideways slide; a tap jumps exactly.
+                        if (scrubber.active) scrubber.moveTo(target) else player.seekTo(target)
+                    },
                     onSeekStart = {
                         draggingSeekBar = true
-                        resumeAfterSeek = player.playWhenReady
-                        player.pause()
+                        scrubber.begin()
                     },
                     onSeekEnd = {
                         draggingSeekBar = false
-                        if (resumeAfterSeek) player.play()
+                        scrubber.finish()
                     },
                     hasPrevious = page > 0,
                     hasNext = page < items.lastIndex,
