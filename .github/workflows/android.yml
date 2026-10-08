@@ -29,27 +29,41 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           ON_MAIN: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
         run: |
-          keystore="$RUNNER_TEMP/release.p12"
+          uploaded="$RUNNER_TEMP/uploaded.p12"
           if [ "$ON_MAIN" = "true" ] && [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
-            echo "::add-mask::$KEYSTORE_PASSWORD"
-            echo "RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            # Pasted secrets can pick up stray line breaks; neither value has any of its own.
+            KEY_PASSWORD="$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n')"
+            printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 --decode > "$uploaded"
             echo "PUBLISH=true" >> "$GITHUB_ENV"
           else
             # Pull requests, or main before the secrets exist: sign with a throwaway key made the
-            # same way as the real one, so the signing setup is checked on every build.
+            # way the README's steps make one on a Mac (older ciphers included), so every build
+            # checks the whole signing path.
             if [ "$ON_MAIN" = "true" ]; then
               echo "::warning::RELEASE_KEYSTORE_BASE64 or RELEASE_KEYSTORE_PASSWORD is not set, so no release is published. See the README."
             fi
-            password="throwaway-$RANDOM$RANDOM"
+            KEY_PASSWORD="throwaway-$RANDOM$RANDOM"
             openssl req -x509 -newkey rsa:2048 -sha256 -days 30 -nodes -subj "/CN=Gallery test" \
               -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem" 2>/dev/null
-            openssl pkcs12 -export -name gallery -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
-              -out "$keystore" -passout "pass:$password"
+            openssl pkcs12 -export -legacy -name gallery -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
+              -out "$uploaded" -passout "pass:$KEY_PASSWORD"
             rm "$RUNNER_TEMP/key.pem" "$RUNNER_TEMP/cert.pem"
-            echo "RELEASE_KEYSTORE_PASSWORD=$password" >> "$GITHUB_ENV"
           fi
+          export KEY_PASSWORD
+
+          # macOS's openssl writes keystores with older ciphers that Java can fail to read. Unlock
+          # the key here, which also checks the password, and save it again in the current format.
+          if ! openssl pkcs12 -legacy -in "$uploaded" -passin env:KEY_PASSWORD -nodes \
+              -out "$RUNNER_TEMP/key-and-cert.pem" 2>/dev/null; then
+            echo "::error::RELEASE_KEYSTORE_PASSWORD does not unlock the key in RELEASE_KEYSTORE_BASE64. Re-enter both secrets (see the README)."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/release.p12"
+          openssl pkcs12 -export -name gallery -in "$RUNNER_TEMP/key-and-cert.pem" -out "$keystore" \
+            -passout env:KEY_PASSWORD
+          rm "$uploaded" "$RUNNER_TEMP/key-and-cert.pem"
           echo "RELEASE_KEYSTORE=$keystore" >> "$GITHUB_ENV"
+          echo "RELEASE_KEYSTORE_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build debug and release APKs and run unit tests
         run: ./gradlew --no-daemon assembleDebug assembleRelease testDebugUnitTest
