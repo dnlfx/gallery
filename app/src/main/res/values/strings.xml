@@ -44,5 +44,8 @@
     <string name="viewer_a11y_volume_up">Volume up</string>
     <string name="viewer_a11y_volume_down">Volume down</string>
     <string name="viewer_a11y_toggle_controls">Show or hide controls</string>
+    <string name="viewer_save_frame">Save this frame as a picture</string>
+    <string name="viewer_frame_saved">Frame saved to Pictures/Gallery</string>
+    <string name="viewer_frame_failed">Couldn\'t save this frame</string>
     <string name="viewer_video_error">This phone can\'t play this video</string>
 </resources>

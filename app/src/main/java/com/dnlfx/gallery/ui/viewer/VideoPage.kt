@@ -10,6 +10,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,9 +23,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,11 +45,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -52,6 +60,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
@@ -61,12 +70,12 @@ import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.thumbnail.MediaThumbnail
 import com.dnlfx.gallery.ui.grid.formatDuration
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** A still frame for video pages that aren't on screen, so only one player exists at a time. */
 @Composable
@@ -83,9 +92,10 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
  * The video on screen, with its touch controls:
  * - tap anywhere to show or hide the controls;
  * - double-tap the left third to go back 10 seconds, the right third to go forward 10 seconds,
- *   and keep tapping that side to add 10 more each time;
+ *   and keep tapping that side to add 10 more each time; double-tap the middle to play or pause;
  * - slide sideways anywhere to scrub through the video;
- * - slide up or down to change the volume.
+ * - slide up or down to change the volume;
+ * - pinch to zoom; while zoomed in, one finger moves the picture instead of scrubbing.
  *
  * Screen readers get the same skips and volume changes as actions on the video.
  */
@@ -96,6 +106,7 @@ fun VideoPage(
     scrubber: Scrubber,
     playback: PlaybackState,
     onToggleControls: () -> Unit,
+    onTogglePlay: () -> Unit,
     onInteraction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -103,6 +114,7 @@ fun VideoPage(
     val view = LocalView.current
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val toggleControls by rememberUpdatedState(onToggleControls)
+    val togglePlay by rememberUpdatedState(onTogglePlay)
     val interacted by rememberUpdatedState(onInteraction)
     val scope = rememberCoroutineScope()
 
@@ -111,6 +123,10 @@ fun VideoPage(
     var scrub by remember { mutableStateOf<ScrubFeedback?>(null) }
     var volume by remember { mutableStateOf<Float?>(null) }
     var volumeToken by remember { mutableIntStateOf(0) }
+    var playFeedback by remember { mutableStateOf<Boolean?>(null) }
+    var playToken by remember { mutableIntStateOf(0) }
+    var zoom by remember(item.id) { mutableStateOf(VideoZoom()) }
+    var videoSize by remember { mutableStateOf(IntSize.Zero) }
 
     LaunchedEffect(skipToken) {
         delay(FEEDBACK_MILLIS)
@@ -120,13 +136,25 @@ fun VideoPage(
         delay(FEEDBACK_MILLIS)
         volume = null
     }
+    LaunchedEffect(playToken) {
+        delay(FEEDBACK_MILLIS)
+        playFeedback = null
+    }
 
     Box(modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { ctx -> SurfaceView(ctx).also(player::setVideoSurfaceView) },
+            // A SurfaceView follows its view's scale and position, so zooming costs nothing extra.
+            update = {
+                it.scaleX = zoom.scale
+                it.scaleY = zoom.scale
+                it.translationX = zoom.x
+                it.translationY = zoom.y
+            },
             onRelease = { player.clearVideoSurfaceView(it) },
             modifier = Modifier
                 .align(Alignment.Center)
+                .onSizeChanged { videoSize = it }
                 .then(
                     if (playback.aspectRatio > 0f) {
                         Modifier.aspectRatio(playback.aspectRatio)
@@ -205,7 +233,13 @@ fun VideoPage(
                         try {
                             while (true) {
                                 val event = awaitPointerEvent()
-                                if (event.changes.count { it.pressed } > 1) multiTouch = true
+                                if (event.changes.count { it.pressed } > 1) {
+                                    multiTouch = true
+                                    if (mode == DragMode.NONE) {
+                                        mode = DragMode.ZOOM
+                                        interacted()
+                                    }
+                                }
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 if (!change.pressed) {
                                     released = true
@@ -216,7 +250,11 @@ fun VideoPage(
                                 total += change.positionChange()
                                 var engagedNow = false
                                 if (mode == DragMode.NONE && !multiTouch && total.getDistance() > viewConfiguration.touchSlop) {
-                                    mode = if (abs(total.x) > abs(total.y)) DragMode.SCRUB else DragMode.VOLUME
+                                    mode = when {
+                                        zoom.zoomed -> DragMode.PAN
+                                        abs(total.x) > abs(total.y) -> DragMode.SCRUB
+                                        else -> DragMode.VOLUME
+                                    }
                                     interacted()
                                     if (mode == DragMode.SCRUB) {
                                         engagedNow = true
@@ -258,6 +296,26 @@ fun VideoPage(
                                             volumeToken++
                                         }
                                     }
+                                    DragMode.ZOOM -> {
+                                        val centroid = event.calculateCentroid(useCurrent = true)
+                                        if (centroid.isSpecified) {
+                                            val pan = event.calculatePan()
+                                            zoom = zoom.transformed(
+                                                zoom = event.calculateZoom(),
+                                                focusX = centroid.x - size.width / 2f,
+                                                focusY = centroid.y - size.height / 2f,
+                                                panX = pan.x,
+                                                panY = pan.y,
+                                                content = videoSize.toZoomSize(),
+                                                container = size.toZoomSize(),
+                                            )
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                    DragMode.PAN -> {
+                                        val pan = change.positionChange()
+                                        zoom = zoom.panned(pan.x, pan.y, videoSize.toZoomSize(), size.toZoomSize())
+                                    }
                                     DragMode.NONE -> Unit
                                 }
                                 if (mode != DragMode.NONE) change.consume()
@@ -268,6 +326,7 @@ fun VideoPage(
                                 scrubber.finish()
                                 scrub = null
                             }
+                            if (mode == DragMode.ZOOM) zoom = zoom.settled()
                         }
 
                         if (mode != DragMode.NONE || multiTouch) {
@@ -294,6 +353,12 @@ fun VideoPage(
                                     skip = skipBy(player, skip, forward = true)
                                     skipToken++
                                 }
+                                TapResult.TOGGLE_PLAY -> {
+                                    interacted()
+                                    togglePlay()
+                                    playFeedback = player.playWhenReady
+                                    playToken++
+                                }
                             }
                         }
                     }
@@ -307,6 +372,16 @@ fun VideoPage(
                     .align(if (feedback.forward) Alignment.CenterEnd else Alignment.CenterStart)
                     .padding(horizontal = 48.dp),
             )
+        }
+        playFeedback?.let { playing ->
+            Pill(Modifier.align(Alignment.Center)) {
+                Icon(
+                    imageVector = if (playing) Icons.Filled.PlayArrow else ViewerIcons.Pause,
+                    contentDescription = stringResource(if (playing) R.string.viewer_play else R.string.viewer_pause),
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
         }
         scrub?.let { feedback ->
             Pill(Modifier.align(Alignment.Center)) {
@@ -412,7 +487,9 @@ private fun Pill(modifier: Modifier = Modifier, content: @Composable () -> Unit)
     }
 }
 
-private enum class DragMode { NONE, SCRUB, VOLUME }
+private enum class DragMode { NONE, SCRUB, VOLUME, ZOOM, PAN }
+
+private fun IntSize.toZoomSize() = VideoZoom.Size(width.toFloat(), height.toFloat())
 
 private data class SkipFeedback(val forward: Boolean, val seconds: Int)
 
