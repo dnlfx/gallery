@@ -57,6 +57,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
@@ -113,7 +114,10 @@ fun ViewerScreen(
     }
 
     val player = remember {
-        ExoPlayer.Builder(context)
+        // If the phone's preferred decoder can't take a file (an unusual HEVC profile, say),
+        // try the next one instead of failing.
+        val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        ExoPlayer.Builder(context, renderers)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

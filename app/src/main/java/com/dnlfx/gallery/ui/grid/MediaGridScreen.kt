@@ -1,5 +1,6 @@
 package com.dnlfx.gallery.ui.grid
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,6 +39,9 @@ import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
 import com.dnlfx.gallery.thumbnail.MediaThumbnail
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,25 +82,41 @@ fun MediaGridScreen(
                     Text(stringResource(R.string.empty_library))
                 }
             } else {
-                LazyVerticalGrid(
-                    state = gridState,
-                    // About four columns on a phone held upright, more in landscape.
-                    columns = GridCells.Adaptive(minSize = 88.dp),
-                    contentPadding = padding,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    if (limitedAccess) {
-                        item(span = { GridItemSpan(maxLineSpan) }, contentType = "banner") {
-                            LimitedAccessBanner(onRequestFullAccess)
+                val media = state.items
+                val headerCount = if (limitedAccess) 1 else 0
+                val monthFormat = remember {
+                    val locale = Locale.getDefault()
+                    SimpleDateFormat(DateFormat.getBestDateTimePattern(locale, "MMMMyyyy"), locale)
+                }
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        // About four columns on a phone held upright, more in landscape.
+                        columns = GridCells.Adaptive(minSize = 88.dp),
+                        contentPadding = padding,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        if (limitedAccess) {
+                            item(span = { GridItemSpan(maxLineSpan) }, contentType = "banner") {
+                                LimitedAccessBanner(onRequestFullAccess)
+                            }
+                        }
+                        items(count = media.size, key = { media[it].id }, contentType = { "media" }) { index ->
+                            val item = media[index]
+                            MediaCell(item = item, onClick = { onItemClick(index, item) })
                         }
                     }
-                    val media = state.items
-                    items(count = media.size, key = { media[it].id }, contentType = { "media" }) { index ->
-                        val item = media[index]
-                        MediaCell(item = item, onClick = { onItemClick(index, item) })
-                    }
+                    FastScroller(
+                        gridState = gridState,
+                        labelFor = { index ->
+                            media.getOrNull(index - headerCount)?.let {
+                                monthFormat.format(Date(it.dateModifiedSeconds * 1000))
+                            }
+                        },
+                        contentPadding = padding,
+                    )
                 }
             }
         }

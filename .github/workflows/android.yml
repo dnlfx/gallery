@@ -9,6 +9,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    permissions:
+      # Publishing a GitHub Release from main.
+      contents: write
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -16,16 +22,67 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v6
-      - name: Build debug APK and run unit tests
-        run: ./gradlew --no-daemon assembleDebug testDebugUnitTest
+
+      - name: Set up release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          ON_MAIN: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        run: |
+          keystore="$RUNNER_TEMP/release.p12"
+          if [ "$ON_MAIN" = "true" ] && [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$keystore"
+            echo "::add-mask::$KEYSTORE_PASSWORD"
+            echo "RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "PUBLISH=true" >> "$GITHUB_ENV"
+          else
+            # Pull requests, or main before the secrets exist: sign with a throwaway key made the
+            # same way as the real one, so the signing setup is checked on every build.
+            if [ "$ON_MAIN" = "true" ]; then
+              echo "::warning::RELEASE_KEYSTORE_BASE64 or RELEASE_KEYSTORE_PASSWORD is not set, so no release is published. See the README."
+            fi
+            password="throwaway-$RANDOM$RANDOM"
+            openssl req -x509 -newkey rsa:2048 -sha256 -days 30 -nodes -subj "/CN=Gallery test" \
+              -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem" 2>/dev/null
+            openssl pkcs12 -export -name gallery -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
+              -out "$keystore" -passout "pass:$password"
+            rm "$RUNNER_TEMP/key.pem" "$RUNNER_TEMP/cert.pem"
+            echo "RELEASE_KEYSTORE_PASSWORD=$password" >> "$GITHUB_ENV"
+          fi
+          echo "RELEASE_KEYSTORE=$keystore" >> "$GITHUB_ENV"
+
+      - name: Build debug and release APKs and run unit tests
+        run: ./gradlew --no-daemon assembleDebug assembleRelease testDebugUnitTest
+
       - name: Check the app has no network permission
         run: |
           manifests=$(find app/build/intermediates -path '*merged_manifest*' -name AndroidManifest.xml)
           test -n "$manifests" || { echo "No merged manifest found"; exit 1; }
+          echo "$manifests"
           if grep -l 'android.permission.INTERNET' $manifests; then
             echo "The merged manifest requests network access"; exit 1
           fi
+
+      - name: Check the release APK is signed
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/apksigner"
+          "$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
+
       - uses: actions/upload-artifact@v7
         with:
           name: gallery-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Publish a GitHub Release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The same file name in every release keeps one download link working:
+          # https://github.com/${{ github.repository }}/releases/latest/download/gallery.apk
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/gallery.apk"
+          gh release create "v$VERSION_NAME" "$RUNNER_TEMP/gallery.apk" \
+            --target "$GITHUB_SHA" \
+            --title "Gallery $VERSION_NAME" \
+            --generate-notes \
+            --latest

@@ -235,6 +235,16 @@ fun VideoPage(
                 }
             }
         }
+        if (playback.failed) {
+            // Below the play button, which sits in the center.
+            Pill(Modifier.align(Alignment.Center).padding(top = 160.dp)) {
+                Text(
+                    text = stringResource(R.string.viewer_video_error),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
+            }
+        }
         AnimatedVisibility(
             visible = volume != null,
             enter = fadeIn(),
