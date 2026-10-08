@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +45,7 @@ fun MediaGridScreen(
     limitedAccess: Boolean,
     onRequestFullAccess: () -> Unit,
     onItemClick: (index: Int, item: MediaItem) -> Unit,
+    gridState: LazyGridState = rememberLazyGridState(),
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     Scaffold(
@@ -75,6 +78,7 @@ fun MediaGridScreen(
                 }
             } else {
                 LazyVerticalGrid(
+                    state = gridState,
                     // About four columns on a phone held upright, more in landscape.
                     columns = GridCells.Adaptive(minSize = 88.dp),
                     contentPadding = padding,

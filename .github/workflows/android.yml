@@ -18,6 +18,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Build debug APK and run unit tests
         run: ./gradlew --no-daemon assembleDebug testDebugUnitTest
+      - name: Check the app has no network permission
+        run: |
+          manifests=$(find app/build/intermediates -path '*merged_manifest*' -name AndroidManifest.xml)
+          test -n "$manifests" || { echo "No merged manifest found"; exit 1; }
+          if grep -l 'android.permission.INTERNET' $manifests; then
+            echo "The merged manifest requests network access"; exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: gallery-debug-apk
