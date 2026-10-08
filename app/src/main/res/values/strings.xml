@@ -19,4 +19,5 @@
     <string name="viewer_volume">Volume</string>
     <string name="viewer_skip_back">−%1$d s</string>
     <string name="viewer_skip_forward">+%1$d s</string>
+    <string name="viewer_video_error">This phone can\'t play this video</string>
 </resources>

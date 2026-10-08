@@ -10,12 +10,16 @@ import android.os.Looper
 import android.provider.BaseColumns
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 
 /**
  * Reads every image and video on the device's shared storage as one flat list,
@@ -28,11 +32,16 @@ class MediaRepository(context: Context) {
     private val imagesUri = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
     private val videosUri = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
 
-    /** Emits the full library now and again whenever MediaStore reports a change. */
-    fun observeMedia(): Flow<List<MediaItem>> = mediaStoreChanges()
-        .conflate()
-        .map { queryAll() }
-        .flowOn(Dispatchers.IO)
+    /**
+     * Emits the full library now and again whenever MediaStore reports a change. A burst of
+     * changes (a camera burst, a folder copied in) re-reads the library once, not once per file.
+     */
+    @OptIn(FlowPreview::class)
+    fun observeMedia(): Flow<List<MediaItem>> =
+        merge(flowOf(Unit), mediaStoreChanges().debounce(CHANGE_DEBOUNCE_MILLIS))
+            .conflate()
+            .map { queryAll() }
+            .flowOn(Dispatchers.IO)
 
     private fun mediaStoreChanges(): Flow<Unit> = callbackFlow {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -41,7 +50,6 @@ class MediaRepository(context: Context) {
             }
         }
         resolver.registerContentObserver(filesUri, true, observer)
-        send(Unit)
         awaitClose { resolver.unregisterContentObserver(observer) }
     }
 
@@ -56,6 +64,7 @@ class MediaRepository(context: Context) {
             MediaStore.MediaColumns.DURATION,
             MediaStore.MediaColumns.WIDTH,
             MediaStore.MediaColumns.HEIGHT,
+            MediaStore.MediaColumns.ORIENTATION,
             MediaStore.MediaColumns.SIZE,
         )
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
@@ -80,6 +89,7 @@ class MediaRepository(context: Context) {
         val durationCol = getColumnIndexOrThrow(MediaStore.MediaColumns.DURATION)
         val widthCol = getColumnIndexOrThrow(MediaStore.MediaColumns.WIDTH)
         val heightCol = getColumnIndexOrThrow(MediaStore.MediaColumns.HEIGHT)
+        val orientationCol = getColumnIndexOrThrow(MediaStore.MediaColumns.ORIENTATION)
         val sizeCol = getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
 
         val items = ArrayList<MediaItem>(count)
@@ -97,10 +107,15 @@ class MediaRepository(context: Context) {
                 durationMillis = if (isVideo) getLongOrNull(durationCol) else null,
                 width = getInt(widthCol),
                 height = getInt(heightCol),
+                orientationDegrees = ((getInt(orientationCol) % 360) + 360) % 360,
                 sizeBytes = getLong(sizeCol),
             )
         }
         return items
+    }
+
+    private companion object {
+        const val CHANGE_DEBOUNCE_MILLIS = 300L
     }
 
     private fun Cursor.getStringOrNull(col: Int): String? = if (isNull(col)) null else getString(col)

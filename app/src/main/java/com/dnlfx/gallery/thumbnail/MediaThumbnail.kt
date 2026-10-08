@@ -2,6 +2,7 @@ package com.dnlfx.gallery.thumbnail
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.os.CancellationSignal
 import android.util.Size as AndroidSize
 import coil3.ImageLoader
 import coil3.asImage
@@ -12,6 +13,10 @@ import coil3.fetch.ImageFetchResult
 import coil3.key.Keyer
 import coil3.request.Options
 import coil3.size.pxOrElse
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * Grid thumbnail request. [version] (the item's modified time) busts the cache when a file changes.
@@ -31,7 +36,23 @@ class MediaThumbnailFetcher(
     override suspend fun fetch(): FetchResult {
         val width = options.size.width.pxOrElse { DEFAULT_SIZE_PX }
         val height = options.size.height.pxOrElse { DEFAULT_SIZE_PX }
-        val bitmap = resolver.loadThumbnail(data.uri, AndroidSize(width, height), null)
+        // Cells scrolled past during a fling cancel their request; pass that on so the system
+        // stops decoding thumbnails nobody will see.
+        val signal = CancellationSignal()
+        val bitmap = coroutineScope {
+            val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    signal.cancel()
+                }
+            }
+            try {
+                resolver.loadThumbnail(data.uri, AndroidSize(width, height), signal)
+            } finally {
+                watcher.cancel()
+            }
+        }
         return ImageFetchResult(
             image = bitmap.asImage(),
             isSampled = true,

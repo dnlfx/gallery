@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import kotlinx.coroutines.delay
@@ -35,12 +36,17 @@ class PlaybackState {
     var firstFrameRendered by mutableStateOf(false)
         internal set
 
+    /** The player gave up on this video, for example a codec the phone can't decode. */
+    var failed by mutableStateOf(false)
+        internal set
+
     internal fun resetForNewItem() {
         firstFrameRendered = false
         aspectRatio = 0f
         positionMillis = 0L
         durationMillis = 0L
         ended = false
+        failed = false
     }
 
     internal fun sync(player: Player) {
@@ -71,6 +77,10 @@ fun rememberPlaybackState(player: Player): PlaybackState {
 
             override fun onRenderedFirstFrame() {
                 state.firstFrameRendered = true
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                state.failed = true
             }
         }
         player.addListener(listener)

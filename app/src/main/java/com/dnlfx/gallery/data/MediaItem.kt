@@ -17,5 +17,7 @@ data class MediaItem(
     val durationMillis: Long?,
     val width: Int,
     val height: Int,
+    /** Clockwise rotation (0, 90, 180 or 270) the stored pixels need to display upright. */
+    val orientationDegrees: Int,
     val sizeBytes: Long,
 )
