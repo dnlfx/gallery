@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Aperture bloom: six translucent shutter blades that read as both a camera iris
+     and a flower, with light glowing through the opening. Stays inside the 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.9"
+        android:scaleY="0.9">
+        <!-- Light coming through the opening. -->
+        <path android:pathData="M54,54m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="54"
+                    android:centerY="54"
+                    android:gradientRadius="5"
+                    android:startColor="#FFF4D6"
+                    android:endColor="#FFC56B" />
+            </aapt:attr>
+        </path>
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="0">
+            <group android:translateX="5.5">
+                <path
+                    android:fillAlpha="0.85"
+                    android:pathData="M54,54A16,16 0,0 1,54 24A16,16 0,0 1,54 54Z">
+                    <aapt:attr name="android:fillColor">
+                        <gradient
+                            android:type="linear"
+                            android:startX="54"
+                            android:startY="54"
+                            android:endX="54"
+                            android:endY="24"
+                            android:startColor="#FF8A5B"
+                            android:endColor="#8B5CF6" />
+                    </aapt:attr>
+                </path>
+            </group>
+        </group>
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="60">
+            <group android:translateX="5.5">
+                <path
+                    android:fillAlpha="0.85"
+                    android:pathData="M54,54A16,16 0,0 1,54 24A16,16 0,0 1,54 54Z">
+                    <aapt:attr name="android:fillColor">
+                        <gradient
+                            android:type="linear"
+                            android:startX="54"
+                            android:startY="54"
+                            android:endX="54"
+                            android:endY="24"
+                            android:startColor="#FF4F8B"
+                            android:endColor="#5B6CFF" />
+                    </aapt:attr>
+                </path>
+            </group>
+        </group>
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="120">
+            <group android:translateX="5.5">
+                <path
+                    android:fillAlpha="0.85"
+                    android:pathData="M54,54A16,16 0,0 1,54 24A16,16 0,0 1,54 54Z">
+                    <aapt:attr name="android:fillColor">
+                        <gradient
+                            android:type="linear"
+                            android:startX="54"
+                            android:startY="54"
+                            android:endX="54"
+                            android:endY="24"
+                            android:startColor="#FF8A5B"
+                            android:endColor="#8B5CF6" />
+                    </aapt:attr>
+                </path>
+            </group>
+        </group>
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="180">
+            <group android:translateX="5.5">
+                <path
+                    android:fillAlpha="0.85"
+                    android:pathData="M54,54A16,16 0,0 1,54 24A16,16 0,0 1,54 54Z">
+                    <aapt:attr name="android:fillColor">
+                        <gradient
+                            android:type="linear"
+                            android:startX="54"
+                            android:startY="54"
+                            android:endX="54"
+                            android:endY="24"
+                            android:startColor="#FF4F8B"
+                            android:endColor="#5B6CFF" />
+                    </aapt:attr>
+                </path>
+            </group>
+        </group>
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="240">
+            <group android:translateX="5.5">
+                <path
+                    android:fillAlpha="0.85"
+                    android:pathData="M54,54A16,16 0,0 1,54 24A16,16 0,0 1,54 54Z">
+                    <aapt:attr name="android:fillColor">
+                        <gradient
+                            android:type="linear"
+                            android:startX="54"
+                            android:startY="54"
+                            android:endX="54"
+                            android:endY="24"
+                            android:startColor="#FF8A5B"
+                            android:endColor="#8B5CF6" />
+                    </aapt:attr>
+                </path>
+            </group>
+        </group>
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="300">
+            <group android:translateX="5.5">
+                <path
+                    android:fillAlpha="0.85"
+                    android:pathData="M54,54A16,16 0,0 1,54 24A16,16 0,0 1,54 54Z">
+                    <aapt:attr name="android:fillColor">
+                        <gradient
+                            android:type="linear"
+                            android:startX="54"
+                            android:startY="54"
+                            android:endX="54"
+                            android:endY="24"
+                            android:startColor="#FF4F8B"
+                            android:endColor="#5B6CFF" />
+                    </aapt:attr>
+                </path>
+            </group>
+        </group>
+    </group>
+</vector>
