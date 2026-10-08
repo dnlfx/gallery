@@ -16,6 +16,11 @@ import androidx.media3.exoplayer.SeekParameters
  * through a backlog long after the finger let go, so the video sat frozen. Here only one seek is
  * in flight at a time: newer targets replace the waiting one, and the next goes out as soon as
  * the player has a frame. [finish] lands on the exact frame and resumes playback if it was playing.
+ *
+ * The time and progress bar follow the finger (see [PlaybackState.scrubTargetMillis]), so the
+ * picture should show that same moment. Short clips preview exact frames throughout. Long videos
+ * preview keyframes while the finger moves, to keep up, and as soon as the player has caught up
+ * it settles on the exact frame, so picture, time and bar agree whenever the finger slows or stops.
  */
 class Scrubber(private val player: ExoPlayer, private val playback: PlaybackState) {
     var active = false
@@ -26,12 +31,21 @@ class Scrubber(private val player: ExoPlayer, private val playback: PlaybackStat
         private set
 
     private var resume = false
+    private var keyframePreviews = false
     private var waiting: Long? = null
     private var lastSeekAt = 0L
+    private var lastSeekExact = true
 
     internal val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState != Player.STATE_BUFFERING) waiting?.let(::seekNow)
+            if (!active || playbackState == Player.STATE_BUFFERING) return
+            val next = waiting
+            val target = targetMillis
+            when {
+                next != null -> seekNow(next, exact = !keyframePreviews)
+                // Caught up with the finger on a keyframe: refine to the exact frame.
+                !lastSeekExact && target != null -> seekNow(target, exact = true)
+            }
         }
     }
 
@@ -43,9 +57,7 @@ class Scrubber(private val player: ExoPlayer, private val playback: PlaybackStat
         // A finished video stays paused after scrubbing back, like it was before.
         resume = player.playWhenReady && player.playbackState != Player.STATE_ENDED
         player.pause()
-        player.setSeekParameters(
-            if (scrubsExactly(player.duration)) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC,
-        )
+        keyframePreviews = !scrubsExactly(player.duration)
     }
 
     fun moveTo(positionMillis: Long) {
@@ -56,24 +68,27 @@ class Scrubber(private val player: ExoPlayer, private val playback: PlaybackStat
         // takes unusually long, send the newest target anyway rather than freeze the preview.
         val busy = player.playbackState == Player.STATE_BUFFERING &&
             SystemClock.uptimeMillis() - lastSeekAt < MAX_WAIT_MILLIS
-        if (busy) waiting = positionMillis else seekNow(positionMillis)
+        if (busy) waiting = positionMillis else seekNow(positionMillis, exact = !keyframePreviews)
     }
 
     fun finish() {
         if (!active) return
         active = false
         waiting = null
-        player.setSeekParameters(SeekParameters.EXACT)
-        targetMillis?.let { player.seekTo(it) }
+        targetMillis?.let { seekNow(it, exact = true) }
         playback.scrubTargetMillis = null
         // Show where the scrub landed now, not the stale frame from before the next poll.
         playback.sync(player)
         if (resume) player.play()
     }
 
-    private fun seekNow(positionMillis: Long) {
+    private fun seekNow(positionMillis: Long, exact: Boolean) {
         waiting = null
         lastSeekAt = SystemClock.uptimeMillis()
+        if (exact != lastSeekExact) {
+            player.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+            lastSeekExact = exact
+        }
         player.seekTo(positionMillis)
     }
 }
