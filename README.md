@@ -84,8 +84,10 @@ backups are turned off.
 
 ## Video controls
 
-- Tap the left third of the screen to go back 10 seconds, the right third to go forward 10
-  seconds (tap again to add 10 more). Tap the middle to show or hide the controls.
+- Tap anywhere to show or hide the controls. Double-tap the left third of the screen to go back
+  10 seconds, the right third to go forward 10 seconds (keep tapping to add 10 more).
+- With TalkBack, the video offers actions to skip back or forward 10 seconds and to change the
+  volume, and the seek bar can be adjusted like a slider.
 - Slide sideways anywhere on the video to scrub through it. Slow slides move precisely; quick
   ones cover more ground. You feel a tick at the start and end.
 - Slide up or down to change the volume.

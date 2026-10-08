@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +47,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
@@ -55,7 +61,9 @@ import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.thumbnail.MediaThumbnail
 import com.dnlfx.gallery.ui.grid.formatDuration
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -73,10 +81,13 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
 
 /**
  * The video on screen, with its touch controls:
- * - tap the left third to go back 10 seconds, the right third to go forward 10 seconds,
- *   the middle to show or hide the controls;
+ * - tap anywhere to show or hide the controls;
+ * - double-tap the left third to go back 10 seconds, the right third to go forward 10 seconds,
+ *   and keep tapping that side to add 10 more each time;
  * - slide sideways anywhere to scrub through the video;
  * - slide up or down to change the volume.
+ *
+ * Screen readers get the same skips and volume changes as actions on the video.
  */
 @Composable
 fun VideoPage(
@@ -93,6 +104,7 @@ fun VideoPage(
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val toggleControls by rememberUpdatedState(onToggleControls)
     val interacted by rememberUpdatedState(onInteraction)
+    val scope = rememberCoroutineScope()
 
     var skip by remember { mutableStateOf<SkipFeedback?>(null) }
     var skipToken by remember { mutableIntStateOf(0) }
@@ -126,10 +138,55 @@ fun VideoPage(
         // The surface stays black until the first frame, so cover it with the thumbnail until then.
         if (!playback.firstFrameRendered) VideoPoster(item)
 
+        val skipBackLabel = stringResource(R.string.viewer_a11y_skip_back)
+        val skipForwardLabel = stringResource(R.string.viewer_a11y_skip_forward)
+        val volumeUpLabel = stringResource(R.string.viewer_a11y_volume_up)
+        val volumeDownLabel = stringResource(R.string.viewer_a11y_volume_down)
+        val toggleLabel = stringResource(R.string.viewer_a11y_toggle_controls)
         Box(
             Modifier
                 .fillMaxSize()
+                .semantics {
+                    item.displayName?.let { contentDescription = it }
+                    onClick(label = toggleLabel) {
+                        toggleControls()
+                        true
+                    }
+                    customActions = listOf(
+                        CustomAccessibilityAction(skipBackLabel) {
+                            interacted()
+                            skip = skipBy(player, skip, forward = false)
+                            skipToken++
+                            true
+                        },
+                        CustomAccessibilityAction(skipForwardLabel) {
+                            interacted()
+                            skip = skipBy(player, skip, forward = true)
+                            skipToken++
+                            true
+                        },
+                        // The system volume panel announces the new level.
+                        CustomAccessibilityAction(volumeUpLabel) {
+                            audio.adjustStreamVolume(
+                                AudioManager.STREAM_MUSIC,
+                                AudioManager.ADJUST_RAISE,
+                                AudioManager.FLAG_SHOW_UI,
+                            )
+                            true
+                        },
+                        CustomAccessibilityAction(volumeDownLabel) {
+                            audio.adjustStreamVolume(
+                                AudioManager.STREAM_MUSIC,
+                                AudioManager.ADJUST_LOWER,
+                                AudioManager.FLAG_SHOW_UI,
+                            )
+                            true
+                        },
+                    )
+                }
                 .pointerInput(player) {
+                    val taps = TapSequence(viewConfiguration.doubleTapTimeoutMillis)
+                    var pendingToggle: Job? = null
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         var mode = DragMode.NONE
@@ -142,6 +199,7 @@ fun VideoPage(
                         val maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                         val startVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC) / maxVolume.toFloat()
                         var released = false
+                        var upMillis = 0L
                         velocity.addPosition(down.uptimeMillis, down.position)
 
                         try {
@@ -151,6 +209,7 @@ fun VideoPage(
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 if (!change.pressed) {
                                     released = true
+                                    upMillis = change.uptimeMillis
                                     break
                                 }
                                 velocity.addPosition(change.uptimeMillis, change.position)
@@ -211,15 +270,26 @@ fun VideoPage(
                             }
                         }
 
-                        if (mode == DragMode.NONE && released && !multiTouch) {
-                            when (tapZone(down.position.x, size.width.toFloat())) {
-                                TapZone.CENTER -> toggleControls()
-                                TapZone.BACK -> {
+                        if (mode != DragMode.NONE || multiTouch) {
+                            taps.reset()
+                        } else if (released) {
+                            val zone = tapZone(down.position.x, size.width.toFloat())
+                            val result = taps.onTap(zone, down.uptimeMillis, upMillis)
+                            pendingToggle?.cancel()
+                            pendingToggle = null
+                            when (result) {
+                                // Wait out the double-tap window before toggling, so a double tap
+                                // that skips doesn't also flash the controls.
+                                TapResult.PENDING -> pendingToggle = scope.launch {
+                                    delay(viewConfiguration.doubleTapTimeoutMillis)
+                                    toggleControls()
+                                }
+                                TapResult.SKIP_BACK -> {
                                     interacted()
                                     skip = skipBy(player, skip, forward = false)
                                     skipToken++
                                 }
-                                TapZone.FORWARD -> {
+                                TapResult.SKIP_FORWARD -> {
                                     interacted()
                                     skip = skipBy(player, skip, forward = true)
                                     skipToken++

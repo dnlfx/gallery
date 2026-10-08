@@ -14,12 +14,47 @@ const val SKIP_MILLIS = 10_000L
 /** Which part of the video a single tap landed on. */
 enum class TapZone { BACK, CENTER, FORWARD }
 
-/** The left third skips back, the right third skips forward, the middle toggles the controls. */
+/** The left third skips back, the right third skips forward, the middle is neither. */
 fun tapZone(x: Float, width: Float): TapZone = when {
     width <= 0f -> TapZone.CENTER
     x < width / 3f -> TapZone.BACK
     x > width * 2f / 3f -> TapZone.FORWARD
     else -> TapZone.CENTER
+}
+
+/** What a finished tap on the video does. */
+enum class TapResult {
+    /** Possibly a single tap: show or hide the controls unless another tap follows in time. */
+    PENDING,
+    SKIP_BACK,
+    SKIP_FORWARD,
+}
+
+/**
+ * Tells single taps from double taps. A single tap anywhere shows or hides the controls; a double
+ * tap on the left or right third skips 10 seconds, and each further tap on that side while the
+ * taps keep coming adds 10 more, like YouTube and Photos.
+ */
+class TapSequence(private val doubleTapMillis: Long) {
+    private var lastZone: TapZone? = null
+    private var lastUpMillis = 0L
+
+    fun onTap(zone: TapZone, downMillis: Long, upMillis: Long): TapResult {
+        val quick = lastZone != null && downMillis - lastUpMillis <= doubleTapMillis
+        val sameSide = quick && zone == lastZone && zone != TapZone.CENTER
+        lastZone = zone
+        lastUpMillis = upMillis
+        return when {
+            !sameSide -> TapResult.PENDING
+            zone == TapZone.BACK -> TapResult.SKIP_BACK
+            else -> TapResult.SKIP_FORWARD
+        }
+    }
+
+    /** A slide or a multi-finger touch ends any tap sequence. */
+    fun reset() {
+        lastZone = null
+    }
 }
 
 /** Clamps a seek target into the video. An unknown duration (zero or less) only clamps at the start. */

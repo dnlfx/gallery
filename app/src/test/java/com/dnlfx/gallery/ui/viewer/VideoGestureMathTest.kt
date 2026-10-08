@@ -13,6 +13,31 @@ class VideoGestureMathTest {
     }
 
     @Test
+    fun singleTapsWaitAndDoubleTapsSkip() {
+        val taps = TapSequence(doubleTapMillis = 300)
+        // A lone tap on the side only toggles the controls.
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.FORWARD, 1_000, 1_050))
+        // A second tap there in time skips, and each further one skips again.
+        assertEquals(TapResult.SKIP_FORWARD, taps.onTap(TapZone.FORWARD, 1_200, 1_250))
+        assertEquals(TapResult.SKIP_FORWARD, taps.onTap(TapZone.FORWARD, 1_450, 1_500))
+        // Too slow: a fresh single tap.
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.FORWARD, 2_500, 2_550))
+        // The other side, or the middle, never skips on a second tap.
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.BACK, 2_600, 2_650))
+        assertEquals(TapResult.SKIP_BACK, taps.onTap(TapZone.BACK, 2_700, 2_750))
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.CENTER, 5_000, 5_050))
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.CENTER, 5_100, 5_150))
+    }
+
+    @Test
+    fun aSlideBreaksTheTapSequence() {
+        val taps = TapSequence(doubleTapMillis = 300)
+        taps.onTap(TapZone.BACK, 1_000, 1_050)
+        taps.reset()
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.BACK, 1_200, 1_250))
+    }
+
+    @Test
     fun clampsSeeksIntoTheVideo() {
         assertEquals(0L, clampPosition(-5_000, 60_000))
         assertEquals(60_000L, clampPosition(70_000, 60_000))
