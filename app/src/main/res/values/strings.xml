@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gallery</string>
+    <string name="permission_title">See all your photos and videos</string>
+    <string name="permission_body">Gallery needs access to your photos and videos to show them in one place, sorted by when they were last changed.</string>
+    <string name="permission_grant">Allow access</string>
+    <string name="permission_open_settings">Open settings</string>
+    <string name="permission_denied_body">Access was denied. You can turn it on in the app\'s settings under Permissions, Photos and videos.</string>
+    <string name="limited_access_body">Showing only the items you selected.</string>
+    <string name="limited_access_action">Allow all</string>
+    <string name="empty_library">No photos or videos yet</string>
+    <string name="item_count">%1$d items</string>
+</resources>
