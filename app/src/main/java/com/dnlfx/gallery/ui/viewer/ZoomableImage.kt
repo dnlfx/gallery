@@ -1,6 +1,8 @@
 package com.dnlfx.gallery.ui.viewer
 
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -19,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -31,9 +34,11 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import coil3.BitmapImage
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -57,6 +62,12 @@ private const val DOUBLE_TAP_SCALE = 2.5f
 private const val MAX_DECODE_PX = 4096
 private const val TILE_SETTLE_MILLIS = 120L
 
+/** Pulled down this fraction of the screen, or flung faster than this, the viewer closes on release. */
+private const val DISMISS_DISTANCE = 0.15f
+private const val DISMISS_FLING_DP_PER_SECOND = 1_000
+private const val DISMISS_SHRINK = 0.3f
+private const val DISMISS_MILLIS = 150
+
 /**
  * A photo that fits the screen and can be pinch-zoomed, panned and double-tapped. At normal size
  * single-finger drags are left alone so the surrounding pager can swipe to the next item.
@@ -69,6 +80,8 @@ fun ZoomableImage(
     item: MediaItem,
     isCurrentPage: Boolean,
     onTap: () -> Unit,
+    onDismissProgress: (Float) -> Unit,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -76,6 +89,11 @@ fun ZoomableImage(
         val container = with(density) { Size(maxWidth.toPx(), maxHeight.toPx()) }
         var scale by remember { mutableFloatStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
+        // How far a downward slide at normal size has pulled the photo towards closing.
+        var dismissOffset by remember { mutableFloatStateOf(0f) }
+        val latestOnDismissProgress by rememberUpdatedState(onDismissProgress)
+        val latestOnDismiss by rememberUpdatedState(onDismiss)
+        fun dismissProgress() = (dismissOffset / container.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
         var intrinsic by remember { mutableStateOf(Size.Unspecified) }
         var fullLoaded by remember { mutableStateOf(false) }
         // Animated images keep playing instead of getting still full-resolution tiles.
@@ -87,6 +105,7 @@ fun ZoomableImage(
             if (!isCurrentPage) {
                 scale = 1f
                 offset = Offset.Zero
+                dismissOffset = 0f
             }
         }
 
@@ -189,14 +208,40 @@ fun ZoomableImage(
                 }
                 .pointerInput(item.id, container) {
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // At normal size, a slide that starts downwards closes the viewer.
+                        var slide = Offset.Zero
+                        var decided = false
+                        var dismissing = false
+                        val velocity = VelocityTracker()
+                        velocity.addPosition(down.uptimeMillis, down.position)
                         do {
                             val event = awaitPointerEvent()
-                            if (event.changes.any { it.isConsumed }) break
+                            if (!dismissing && event.changes.any { it.isConsumed }) break
                             val pressed = event.changes.count { it.pressed }
                             if (pressed == 0) break
                             val pinching = pressed >= 2
-                            if (!pinching && scale <= 1f) continue
+                            if (dismissing) {
+                                event.changes.firstOrNull { it.id == down.id }?.let {
+                                    velocity.addPosition(it.uptimeMillis, it.position)
+                                }
+                                dismissOffset = (dismissOffset + event.calculatePan().y).coerceAtLeast(0f)
+                                latestOnDismissProgress(dismissProgress())
+                                event.changes.forEach { it.consume() }
+                                continue
+                            }
+                            if (!pinching && scale <= 1f) {
+                                if (!decided) {
+                                    slide += event.calculatePan()
+                                    if (slide.getDistance() > viewConfiguration.touchSlop) {
+                                        decided = true
+                                        // Clearly downwards; anything more sideways is the pager's swipe.
+                                        dismissing = slide.y > 0f && slide.y > abs(slide.x) * 1.5f
+                                        if (dismissing) event.changes.forEach { it.consume() }
+                                    }
+                                }
+                                continue
+                            }
 
                             val zoom = if (pinching) event.calculateZoom() else 1f
                             val pan = event.calculatePan()
@@ -215,13 +260,31 @@ fun ZoomableImage(
                             offset = if (newScale == 1f) Offset.Zero else newOffset
                             if (!atEdge) event.changes.forEach { it.consume() }
                         } while (true)
+
+                        if (dismissing) {
+                            val flung = velocity.calculateVelocity().y > DISMISS_FLING_DP_PER_SECOND.dp.toPx()
+                            val close = flung || dismissProgress() > DISMISS_DISTANCE
+                            scope.launch {
+                                animate(
+                                    initialValue = dismissOffset,
+                                    targetValue = if (close) container.height else 0f,
+                                    animationSpec = if (close) tween(DISMISS_MILLIS) else spring(),
+                                ) { value, _ ->
+                                    dismissOffset = value
+                                    latestOnDismissProgress(dismissProgress())
+                                }
+                                if (close) latestOnDismiss()
+                            }
+                        }
                     }
                 }
                 .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
+                    // Shrinks a little as it's pulled down, so it reads as going back to the grid.
+                    val shrink = 1f - DISMISS_SHRINK * dismissProgress()
+                    scaleX = scale * shrink
+                    scaleY = scale * shrink
                     translationX = offset.x
-                    translationY = offset.y
+                    translationY = offset.y + dismissOffset
                 },
         ) {
             if (!fullLoaded) {

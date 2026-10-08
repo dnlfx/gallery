@@ -22,6 +22,8 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +62,7 @@ import androidx.media3.common.C
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import com.dnlfx.gallery.R
+import com.dnlfx.gallery.data.EXTERNAL_ITEM_ID
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
 import com.dnlfx.gallery.ui.findActivity
@@ -110,7 +113,15 @@ fun ViewerScreen(
             return@LaunchedEffect
         }
         val index = items.indexOfFirst { it.id == currentId }
-        if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
+        if (index >= 0) {
+            if (index != pagerState.currentPage) pagerState.scrollToPage(index)
+        } else {
+            // The item on screen was moved to the trash: the pager now shows its neighbour.
+            items.getOrNull(pagerState.currentPage.coerceAtMost(items.lastIndex))?.let {
+                currentId = it.id
+                latestOnCurrentItemChange(it.id)
+            }
+        }
     }
 
     val player = remember {
@@ -151,6 +162,10 @@ fun ViewerScreen(
     }
 
     var controlsVisible by rememberSaveable { mutableStateOf(true) }
+    var detailsOpen by rememberSaveable { mutableStateOf(false) }
+    // 0 normally, rising towards 1 as a photo is pulled down to close the viewer.
+    var dismissProgress by remember { mutableFloatStateOf(0f) }
+    val trash = rememberTrashRequest()
     var interactions by remember { mutableIntStateOf(0) }
     var draggingSeekBar by remember { mutableStateOf(false) }
     LaunchedEffect(controlsVisible, playback.isPlaying, interactions, draggingSeekBar, video?.id) {
@@ -176,7 +191,7 @@ fun ViewerScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black.copy(alpha = 1f - dismissProgress)),
     ) {
         HorizontalPager(
             state = pagerState,
@@ -193,6 +208,8 @@ fun ViewerScreen(
                     item = item,
                     isCurrentPage = onCurrentPage,
                     onTap = { controlsVisible = !controlsVisible },
+                    onDismissProgress = { dismissProgress = it },
+                    onDismiss = onClose,
                 )
                 MediaType.VIDEO -> if (onCurrentPage && item.id == video?.id) {
                     VideoPage(
@@ -210,7 +227,7 @@ fun ViewerScreen(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible && settledItem != null,
+            visible = controlsVisible && settledItem != null && dismissProgress == 0f,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
@@ -219,6 +236,12 @@ fun ViewerScreen(
                 ViewerTopBar(
                     item = item,
                     onBack = onClose,
+                    onInfo = { detailsOpen = true },
+                    onTrash = if (canTrash && item.id != EXTERNAL_ITEM_ID) {
+                        { trash(item.uri) }
+                    } else {
+                        null
+                    },
                     onRotate = {
                         activity?.requestedOrientation = if (landscape) {
                             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -295,10 +318,20 @@ fun ViewerScreen(
             }
         }
     }
+
+    if (detailsOpen) {
+        settledItem?.let { DetailsSheet(it, onDismiss = { detailsOpen = false }) }
+    }
 }
 
 @Composable
-private fun ViewerTopBar(item: MediaItem, onBack: () -> Unit, onRotate: () -> Unit) {
+private fun ViewerTopBar(
+    item: MediaItem,
+    onBack: () -> Unit,
+    onInfo: () -> Unit,
+    onTrash: (() -> Unit)?,
+    onRotate: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -315,15 +348,18 @@ private fun ViewerTopBar(item: MediaItem, onBack: () -> Unit, onRotate: () -> Un
             )
         }
         Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
-            val millis = item.dateTakenMillis ?: (item.dateModifiedSeconds * 1000)
-            Text(
-                text = remember(millis) {
-                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
-                },
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
-                maxLines = 1,
-            )
+            // The same date the grid sorts and groups by; the date taken is in the details.
+            val millis = (item.dateModifiedSeconds * 1000).takeIf { it > 0 } ?: item.dateTakenMillis
+            if (millis != null) {
+                Text(
+                    text = remember(millis) {
+                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    maxLines = 1,
+                )
+            }
             item.displayName?.let {
                 Text(
                     text = it,
@@ -331,6 +367,22 @@ private fun ViewerTopBar(item: MediaItem, onBack: () -> Unit, onRotate: () -> Un
                     color = Color.White.copy(alpha = 0.75f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        IconButton(onClick = onInfo) {
+            Icon(
+                Icons.Outlined.Info,
+                contentDescription = stringResource(R.string.viewer_info),
+                tint = Color.White,
+            )
+        }
+        if (onTrash != null) {
+            IconButton(onClick = onTrash) {
+                Icon(
+                    Icons.Outlined.Delete,
+                    contentDescription = stringResource(R.string.viewer_delete),
+                    tint = Color.White,
                 )
             }
         }

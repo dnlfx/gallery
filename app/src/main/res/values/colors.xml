@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3's default surfaces; Android 12+ uses the wallpaper colors instead (values-v31). -->
+    <color name="window_background">#FFFEF7FF</color>
+</resources>

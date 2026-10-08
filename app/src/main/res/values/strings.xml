@@ -9,7 +9,12 @@
     <string name="limited_access_body">Showing only the items you selected.</string>
     <string name="limited_access_action">Allow all</string>
     <string name="empty_library">No photos or videos yet</string>
-    <string name="item_count">%1$d items</string>
+    <plurals name="item_count">
+        <item quantity="one">%1$s item</item>
+        <item quantity="other">%1$s items</item>
+    </plurals>
+    <string name="cell_photo">Photo, %1$s</string>
+    <string name="cell_video">Video, %1$s, %2$s</string>
     <string name="viewer_back">Back to all photos</string>
     <string name="viewer_rotate">Rotate screen</string>
     <string name="viewer_play">Play</string>
@@ -19,6 +24,19 @@
     <string name="viewer_volume">Volume</string>
     <string name="viewer_skip_back">−%1$d s</string>
     <string name="viewer_skip_forward">+%1$d s</string>
+    <string name="viewer_info">Details</string>
+    <string name="viewer_delete">Move to trash</string>
+    <string name="details_title">Details</string>
+    <string name="details_modified">Modified</string>
+    <string name="details_taken">Taken</string>
+    <string name="details_name">Name</string>
+    <string name="details_folder">Folder</string>
+    <string name="details_type">Type</string>
+    <string name="details_resolution">Resolution</string>
+    <string name="details_resolution_value">%1$d × %2$d (%3$s MP)</string>
+    <string name="details_length">Length</string>
+    <string name="details_size">Size</string>
+    <string name="viewer_open_failed">This file can\'t be opened</string>
     <string name="viewer_seek_bar">Playback position</string>
     <string name="viewer_seek_position">%1$s of %2$s</string>
     <string name="viewer_a11y_skip_back">Back 10 seconds</string>

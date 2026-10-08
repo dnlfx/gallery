@@ -20,4 +20,6 @@ data class MediaItem(
     /** Clockwise rotation (0, 90, 180 or 270) the stored pixels need to display upright. */
     val orientationDegrees: Int,
     val sizeBytes: Long,
+    /** Folder on shared storage, like "DCIM/Camera/", when known. */
+    val relativePath: String? = null,
 )
