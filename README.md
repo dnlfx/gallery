@@ -79,7 +79,8 @@ backups are turned off.
 
 - Tap the left third of the screen to go back 10 seconds, the right third to go forward 10
   seconds (tap again to add 10 more). Tap the middle to show or hide the controls.
-- Slide sideways anywhere on the video to scrub through it.
+- Slide sideways anywhere on the video to scrub through it. Slow slides move precisely; quick
+  ones cover more ground. You feel a tick at the start and end.
 - Slide up or down to change the volume.
 - Speed button in the bottom bar: 0.25x to 3x. The speed stays set for the next video.
 - With controls hidden, progress is a 2dp line along the bottom edge.

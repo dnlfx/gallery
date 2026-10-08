@@ -2,6 +2,7 @@ package com.dnlfx.gallery.ui.viewer
 
 import android.content.Context
 import android.media.AudioManager
+import android.view.HapticFeedbackConstants
 import android.view.SurfaceView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -40,14 +41,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.SeekParameters
 import coil3.compose.AsyncImage
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
@@ -56,6 +58,7 @@ import com.dnlfx.gallery.ui.grid.formatDuration
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /** A still frame for video pages that aren't on screen, so only one player exists at a time. */
 @Composable
@@ -79,12 +82,14 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
 fun VideoPage(
     item: MediaItem,
     player: ExoPlayer,
+    scrubber: Scrubber,
     playback: PlaybackState,
     onToggleControls: () -> Unit,
     onInteraction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val toggleControls by rememberUpdatedState(onToggleControls)
     val interacted by rememberUpdatedState(onInteraction)
@@ -130,79 +135,94 @@ fun VideoPage(
                         var mode = DragMode.NONE
                         var total = Offset.Zero
                         var multiTouch = false
-                        val startPosition = player.currentPosition
+                        var startPosition = 0L
+                        var scrubPosition = 0f
                         val duration = playback.durationMillis
+                        val velocity = VelocityTracker()
                         val maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                         val startVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC) / maxVolume.toFloat()
-                        var resumeAfterScrub = false
-                        var lastSeek = startPosition
                         var released = false
+                        velocity.addPosition(down.uptimeMillis, down.position)
 
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            if (event.changes.count { it.pressed } > 1) multiTouch = true
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) {
-                                released = true
-                                break
-                            }
-                            total += change.positionChange()
-                            if (mode == DragMode.NONE && !multiTouch && total.getDistance() > viewConfiguration.touchSlop) {
-                                mode = if (abs(total.x) > abs(total.y)) DragMode.SCRUB else DragMode.VOLUME
-                                interacted()
-                                if (mode == DragMode.SCRUB) {
-                                    resumeAfterScrub = player.playWhenReady
-                                    player.pause()
-                                    // Keyframe seeks keep up with a moving finger; the final seek is exact.
-                                    player.setSeekParameters(SeekParameters.CLOSEST_SYNC)
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.changes.count { it.pressed } > 1) multiTouch = true
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) {
+                                    released = true
+                                    break
                                 }
-                            }
-                            when (mode) {
-                                DragMode.SCRUB -> {
-                                    val target = scrubTarget(startPosition, total.x, size.width.toFloat(), duration)
-                                    if (abs(target - lastSeek) >= SCRUB_SEEK_STEP_MILLIS) {
-                                        player.seekTo(target)
-                                        lastSeek = target
+                                velocity.addPosition(change.uptimeMillis, change.position)
+                                total += change.positionChange()
+                                var engagedNow = false
+                                if (mode == DragMode.NONE && !multiTouch && total.getDistance() > viewConfiguration.touchSlop) {
+                                    mode = if (abs(total.x) > abs(total.y)) DragMode.SCRUB else DragMode.VOLUME
+                                    interacted()
+                                    if (mode == DragMode.SCRUB) {
+                                        engagedNow = true
+                                        startPosition = player.currentPosition
+                                        scrubPosition = startPosition.toFloat()
+                                        scrubber.begin()
+                                        scrub = ScrubFeedback(startPosition, 0L, duration)
                                     }
-                                    scrub = ScrubFeedback(target, target - startPosition, duration)
                                 }
-                                DragMode.VOLUME -> {
-                                    if (!audio.isVolumeFixed) {
-                                        val fraction = volumeAfterDrag(startVolume, -total.y, size.height.toFloat())
-                                        audio.setStreamVolume(
-                                            AudioManager.STREAM_MUSIC,
-                                            (fraction * maxVolume).roundToInt(),
-                                            0,
+                                when (mode) {
+                                    // The slide that crossed the touch slop only decides the mode, so
+                                    // the video doesn't jump the moment scrubbing starts.
+                                    DragMode.SCRUB -> if (!engagedNow) {
+                                        val previous = scrubPosition
+                                        scrubPosition = scrubStep(
+                                            positionMillis = previous,
+                                            dragDp = change.positionChange().x.toDp().value,
+                                            speedDpPerSecond = abs(velocity.calculateVelocity().x).toDp().value,
+                                            durationMillis = duration,
                                         )
-                                        volume = fraction
-                                        volumeToken++
+                                        val target = scrubPosition.roundToLong()
+                                        scrubber.moveTo(target)
+                                        scrub = ScrubFeedback(target, target - startPosition, duration)
+                                        // A tick when the slide reaches the start or the end.
+                                        val atEnd = scrubPosition <= 0f || (duration > 0L && scrubPosition >= duration)
+                                        if (atEnd && previous != scrubPosition) {
+                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        }
                                     }
+                                    DragMode.VOLUME -> {
+                                        if (!audio.isVolumeFixed) {
+                                            val fraction = volumeAfterDrag(startVolume, -total.y, size.height.toFloat())
+                                            audio.setStreamVolume(
+                                                AudioManager.STREAM_MUSIC,
+                                                (fraction * maxVolume).roundToInt(),
+                                                0,
+                                            )
+                                            volume = fraction
+                                            volumeToken++
+                                        }
+                                    }
+                                    DragMode.NONE -> Unit
                                 }
-                                DragMode.NONE -> Unit
+                                if (mode != DragMode.NONE) change.consume()
                             }
-                            if (mode != DragMode.NONE) change.consume()
-                        }
-
-                        when {
-                            mode == DragMode.SCRUB -> {
-                                player.setSeekParameters(SeekParameters.EXACT)
-                                scrub?.let { player.seekTo(it.targetMillis) }
-                                if (resumeAfterScrub) player.play()
+                        } finally {
+                            // Also runs if the gesture is cut short, so playback always resumes.
+                            if (mode == DragMode.SCRUB) {
+                                scrubber.finish()
                                 scrub = null
                             }
-                            mode == DragMode.NONE && released && !multiTouch -> {
-                                when (tapZone(down.position.x, size.width.toFloat())) {
-                                    TapZone.CENTER -> toggleControls()
-                                    TapZone.BACK -> {
-                                        interacted()
-                                        skip = skipBy(player, skip, forward = false)
-                                        skipToken++
-                                    }
-                                    TapZone.FORWARD -> {
-                                        interacted()
-                                        skip = skipBy(player, skip, forward = true)
-                                        skipToken++
-                                    }
+                        }
+
+                        if (mode == DragMode.NONE && released && !multiTouch) {
+                            when (tapZone(down.position.x, size.width.toFloat())) {
+                                TapZone.CENTER -> toggleControls()
+                                TapZone.BACK -> {
+                                    interacted()
+                                    skip = skipBy(player, skip, forward = false)
+                                    skipToken++
+                                }
+                                TapZone.FORWARD -> {
+                                    interacted()
+                                    skip = skipBy(player, skip, forward = true)
+                                    skipToken++
                                 }
                             }
                         }
@@ -329,5 +349,4 @@ private data class SkipFeedback(val forward: Boolean, val seconds: Int)
 private data class ScrubFeedback(val targetMillis: Long, val deltaMillis: Long, val durationMillis: Long)
 
 private const val FEEDBACK_MILLIS = 700L
-private const val SCRUB_SEEK_STEP_MILLIS = 100L
 

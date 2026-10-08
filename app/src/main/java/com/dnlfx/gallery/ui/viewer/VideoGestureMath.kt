@@ -29,17 +29,35 @@ fun clampPosition(positionMillis: Long, durationMillis: Long): Long {
 }
 
 /**
- * How far a sideways slide across the whole screen moves playback. Short clips map their full
- * length onto the screen width; longer ones cap at [MAX_SCRUB_SPAN_MILLIS] so fine control is kept.
+ * Milliseconds of video that a 1dp sideways slide moves at a slow, careful pace. The whole clip
+ * takes [FULL_CLIP_SLIDE_DP] of sliding, about two portrait screen widths, so short clips don't
+ * race to the end; long videos cap at [MAX_SCRUB_MILLIS_PER_DP] so small nudges stay small.
  */
-fun scrubSpanMillis(durationMillis: Long): Long =
-    if (durationMillis <= 0L) MAX_SCRUB_SPAN_MILLIS else durationMillis.coerceAtMost(MAX_SCRUB_SPAN_MILLIS)
+fun scrubMillisPerDp(durationMillis: Long): Float =
+    if (durationMillis <= 0L) {
+        MAX_SCRUB_MILLIS_PER_DP
+    } else {
+        (durationMillis / FULL_CLIP_SLIDE_DP).coerceAtMost(MAX_SCRUB_MILLIS_PER_DP)
+    }
 
-/** Target position for a sideways slide of [dragX] pixels that started at [startMillis]. */
-fun scrubTarget(startMillis: Long, dragX: Float, width: Float, durationMillis: Long): Long {
-    if (width <= 0f) return clampPosition(startMillis, durationMillis)
-    val delta = (dragX / width * scrubSpanMillis(durationMillis)).toLong()
-    return clampPosition(startMillis + delta, durationMillis)
+/**
+ * Faster slides cover more ground: up to [SLOW_SLIDE_DP_PER_SECOND] a slide moves at the base
+ * rate, then the multiplier climbs to [MAX_SCRUB_GAIN] at [FAST_SLIDE_DP_PER_SECOND]. Careful
+ * slides stay precise while a quick flick still crosses a long video.
+ */
+fun scrubGain(speedDpPerSecond: Float): Float {
+    val t = (speedDpPerSecond - SLOW_SLIDE_DP_PER_SECOND) / (FAST_SLIDE_DP_PER_SECOND - SLOW_SLIDE_DP_PER_SECOND)
+    return 1f + t.coerceIn(0f, 1f) * (MAX_SCRUB_GAIN - 1f)
+}
+
+/**
+ * Position after one step of a sideways slide: [dragDp] dp at [speedDpPerSecond], from
+ * [positionMillis]. Each step is clamped, so sliding back after reaching an end responds at once.
+ */
+fun scrubStep(positionMillis: Float, dragDp: Float, speedDpPerSecond: Float, durationMillis: Long): Float {
+    val moved = positionMillis + dragDp * scrubMillisPerDp(durationMillis) * scrubGain(speedDpPerSecond)
+    val atLeastZero = moved.coerceAtLeast(0f)
+    return if (durationMillis > 0L) atLeastZero.coerceAtMost(durationMillis.toFloat()) else atLeastZero
 }
 
 /**
@@ -51,4 +69,8 @@ fun volumeAfterDrag(startFraction: Float, dragUp: Float, height: Float): Float {
     return (startFraction + dragUp / height).coerceIn(0f, 1f)
 }
 
-private const val MAX_SCRUB_SPAN_MILLIS = 120_000L
+private const val FULL_CLIP_SLIDE_DP = 800f
+private const val MAX_SCRUB_MILLIS_PER_DP = 250f
+private const val SLOW_SLIDE_DP_PER_SECOND = 400f
+private const val FAST_SLIDE_DP_PER_SECOND = 2_500f
+private const val MAX_SCRUB_GAIN = 3f
