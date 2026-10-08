@@ -85,7 +85,12 @@ backups are turned off.
 ## Video controls
 
 - Tap anywhere to show or hide the controls. Double-tap the left third of the screen to go back
-  10 seconds, the right third to go forward 10 seconds (keep tapping to add 10 more).
+  10 seconds, the right third to go forward 10 seconds (keep tapping to add 10 more), or the
+  middle to play or pause.
+- Pinch to zoom up to 5x. While zoomed in, slide one finger to move around the picture; pinch
+  back out to return to the full frame.
+- While a video is paused, the camera button in the top bar saves the frame on screen as a
+  picture in Pictures/Gallery, at the video's full resolution.
 - With TalkBack, the video offers actions to skip back or forward 10 seconds and to change the
   volume, and the seek bar can be adjusted like a slider.
 - Slide sideways anywhere on the video to scrub through it. Slow slides move precisely; quick

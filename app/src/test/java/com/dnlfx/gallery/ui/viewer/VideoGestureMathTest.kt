@@ -22,11 +22,18 @@ class VideoGestureMathTest {
         assertEquals(TapResult.SKIP_FORWARD, taps.onTap(TapZone.FORWARD, 1_450, 1_500))
         // Too slow: a fresh single tap.
         assertEquals(TapResult.PENDING, taps.onTap(TapZone.FORWARD, 2_500, 2_550))
-        // The other side, or the middle, never skips on a second tap.
+        // Switching sides starts a new sequence.
         assertEquals(TapResult.PENDING, taps.onTap(TapZone.BACK, 2_600, 2_650))
         assertEquals(TapResult.SKIP_BACK, taps.onTap(TapZone.BACK, 2_700, 2_750))
+    }
+
+    @Test
+    fun doubleTapInTheMiddlePlaysOrPauses() {
+        val taps = TapSequence(doubleTapMillis = 300)
         assertEquals(TapResult.PENDING, taps.onTap(TapZone.CENTER, 5_000, 5_050))
-        assertEquals(TapResult.PENDING, taps.onTap(TapZone.CENTER, 5_100, 5_150))
+        assertEquals(TapResult.TOGGLE_PLAY, taps.onTap(TapZone.CENTER, 5_100, 5_150))
+        // A third quick tap doesn't toggle again straight away.
+        assertEquals(TapResult.PENDING, taps.onTap(TapZone.CENTER, 5_200, 5_250))
     }
 
     @Test
@@ -78,12 +85,44 @@ class VideoGestureMathTest {
     }
 
     @Test
-    fun shortClipsPreviewExactFrames() {
-        assertEquals(true, scrubsExactly(20_000))
-        assertEquals(true, scrubsExactly(180_000))
-        assertEquals(false, scrubsExactly(600_000))
-        assertEquals(false, scrubsExactly(0))
-        assertEquals(false, scrubsExactly(-9_223_372_036_854_775_807L))
+    fun scrubPreviewsStopJustShortOfTheEnd() {
+        assertEquals(10_000L, scrubSeekPosition(10_000, 30_000))
+        assertEquals(29_950L, scrubSeekPosition(30_000, 30_000))
+        // Unknown length: nothing to stop short of.
+        assertEquals(30_000L, scrubSeekPosition(30_000, -1))
+    }
+
+    @Test
+    fun pinchingZoomsAroundTheFingers() {
+        // A 1080x608 video fitted in a 1080x2400 portrait screen.
+        val video = VideoZoom.Size(1080f, 608f)
+        val screen = VideoZoom.Size(1080f, 2400f)
+        // Doubling in size around a point 200px right of centre keeps that point still.
+        val zoomed = VideoZoom().transformed(2f, 200f, 0f, 0f, 0f, video, screen)
+        assertEquals(2f, zoomed.scale, 0.0001f)
+        assertEquals(-200f, zoomed.x, 0.0001f)
+        // Taller than the screen it isn't, so it stays centred vertically.
+        assertEquals(0f, zoomed.y, 0.0001f)
+        // Can't zoom out past the fitted size or in past 5x.
+        assertEquals(1f, zoomed.transformed(0.1f, 0f, 0f, 0f, 0f, video, screen).scale, 0.0001f)
+        assertEquals(5f, zoomed.transformed(10f, 0f, 0f, 0f, 0f, video, screen).scale, 0.0001f)
+    }
+
+    @Test
+    fun panningStopsAtTheVideosEdges() {
+        val video = VideoZoom.Size(1080f, 608f)
+        val screen = VideoZoom.Size(1080f, 2400f)
+        val zoomed = VideoZoom(scale = 2f)
+        // At 2x the video is 2160 wide, so it can move 540px each way, and not at all vertically.
+        assertEquals(540f, zoomed.panned(5_000f, 300f, video, screen).x, 0.0001f)
+        assertEquals(0f, zoomed.panned(5_000f, 300f, video, screen).y, 0.0001f)
+        assertEquals(-540f, zoomed.panned(-5_000f, 0f, video, screen).x, 0.0001f)
+    }
+
+    @Test
+    fun barelyZoomedSnapsBack() {
+        assertEquals(VideoZoom(), VideoZoom(scale = 1.03f, x = 4f).settled())
+        assertEquals(VideoZoom(scale = 1.5f), VideoZoom(scale = 1.5f).settled())
     }
 
     @Test

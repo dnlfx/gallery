@@ -2,6 +2,7 @@ package com.dnlfx.gallery.ui.viewer
 
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -59,6 +60,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import com.dnlfx.gallery.R
@@ -73,6 +76,7 @@ import java.util.Date
 import androidx.media3.common.MediaItem as PlayerMediaItem
 
 private const val CONTROLS_HIDE_MILLIS = 3_000L
+private const val LOCAL_START_BUFFER_MILLIS = 250
 
 /**
  * Full-screen viewer. Swipe sideways between items in grid order; photos zoom, videos play with
@@ -137,6 +141,19 @@ fun ViewerScreen(
                 /* handleAudioFocus = */ true,
             )
             .setHandleAudioBecomingNoisy(true)
+            // Everything plays from the phone's own storage, which reads far faster than playback
+            // needs, so start (and restart after a seek or scrub) once a quarter second is ready
+            // instead of the default full second.
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMsForLocalPlayback(
+                        DefaultLoadControl.DEFAULT_MIN_BUFFER_FOR_LOCAL_PLAYBACK_MS,
+                        DefaultLoadControl.DEFAULT_MAX_BUFFER_FOR_LOCAL_PLAYBACK_MS,
+                        LOCAL_START_BUFFER_MILLIS,
+                        LOCAL_START_BUFFER_MILLIS,
+                    )
+                    .build(),
+            )
             .build()
     }
     DisposableEffect(player) { onDispose { player.release() } }
@@ -218,6 +235,7 @@ fun ViewerScreen(
                         scrubber = scrubber,
                         playback = playback,
                         onToggleControls = { controlsVisible = !controlsVisible },
+                        onTogglePlay = { togglePlayback(player) },
                         onInteraction = { interactions++ },
                     )
                 } else {
@@ -237,6 +255,22 @@ fun ViewerScreen(
                     item = item,
                     onBack = onClose,
                     onInfo = { detailsOpen = true },
+                    // Offered while a video is paused on the frame to keep.
+                    onSaveFrame = if (video != null && item.id == video.id && (!playback.playWhenReady || playback.ended)) {
+                        {
+                            val position = player.currentPosition
+                            scope.launch {
+                                val saved = saveVideoFrame(context, video, position)
+                                Toast.makeText(
+                                    context,
+                                    if (saved) R.string.viewer_frame_saved else R.string.viewer_frame_failed,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    } else {
+                        null
+                    },
                     onTrash = if (canTrash && item.id != EXTERNAL_ITEM_ID) {
                         { trash(item.uri) }
                     } else {
@@ -264,14 +298,7 @@ fun ViewerScreen(
                 PlayPauseButton(
                     playing = playback.playWhenReady && !playback.ended,
                     onClick = {
-                        when {
-                            playback.ended -> {
-                                player.seekTo(0L)
-                                player.play()
-                            }
-                            player.playWhenReady -> player.pause()
-                            else -> player.play()
-                        }
+                        togglePlayback(player)
                         interactions++
                     },
                 )
@@ -324,11 +351,24 @@ fun ViewerScreen(
     }
 }
 
+/** Plays or pauses; a finished video starts again from the beginning. */
+private fun togglePlayback(player: Player) {
+    when {
+        player.playbackState == Player.STATE_ENDED -> {
+            player.seekTo(0L)
+            player.play()
+        }
+        player.playWhenReady -> player.pause()
+        else -> player.play()
+    }
+}
+
 @Composable
 private fun ViewerTopBar(
     item: MediaItem,
     onBack: () -> Unit,
     onInfo: () -> Unit,
+    onSaveFrame: (() -> Unit)?,
     onTrash: (() -> Unit)?,
     onRotate: () -> Unit,
 ) {
@@ -367,6 +407,15 @@ private fun ViewerTopBar(
                     color = Color.White.copy(alpha = 0.75f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onSaveFrame != null) {
+            IconButton(onClick = onSaveFrame) {
+                Icon(
+                    ViewerIcons.PhotoCamera,
+                    contentDescription = stringResource(R.string.viewer_save_frame),
+                    tint = Color.White,
                 )
             }
         }
