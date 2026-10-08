@@ -25,8 +25,15 @@ class PlaybackState {
         internal set
     var ended by mutableStateOf(false)
         internal set
-    var positionMillis by mutableLongStateOf(0L)
-        internal set
+    private var playerPositionMillis by mutableLongStateOf(0L)
+
+    /**
+     * Where a scrub is heading, while one is under way. The player only reports the frame it last
+     * landed on, which trails the finger, so the time and progress bar show this instead.
+     */
+    internal var scrubTargetMillis by mutableStateOf<Long?>(null)
+
+    val positionMillis: Long get() = scrubTargetMillis ?: playerPositionMillis
     var durationMillis by mutableLongStateOf(0L)
         internal set
 
@@ -43,7 +50,8 @@ class PlaybackState {
     internal fun resetForNewItem() {
         firstFrameRendered = false
         aspectRatio = 0f
-        positionMillis = 0L
+        playerPositionMillis = 0L
+        scrubTargetMillis = null
         durationMillis = 0L
         ended = false
         failed = false
@@ -53,7 +61,7 @@ class PlaybackState {
         isPlaying = player.isPlaying
         playWhenReady = player.playWhenReady
         ended = player.playbackState == Player.STATE_ENDED
-        positionMillis = player.currentPosition.coerceAtLeast(0L)
+        playerPositionMillis = player.currentPosition.coerceAtLeast(0L)
         durationMillis = player.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0L) ?: 0L
     }
 }

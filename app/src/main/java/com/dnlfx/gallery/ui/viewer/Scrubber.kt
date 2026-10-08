@@ -17,7 +17,7 @@ import androidx.media3.exoplayer.SeekParameters
  * in flight at a time: newer targets replace the waiting one, and the next goes out as soon as
  * the player has a frame. [finish] lands on the exact frame and resumes playback if it was playing.
  */
-class Scrubber(private val player: ExoPlayer) {
+class Scrubber(private val player: ExoPlayer, private val playback: PlaybackState) {
     var active = false
         private set
 
@@ -51,6 +51,7 @@ class Scrubber(private val player: ExoPlayer) {
     fun moveTo(positionMillis: Long) {
         if (!active || positionMillis == targetMillis) return
         targetMillis = positionMillis
+        playback.scrubTargetMillis = positionMillis
         // The player reports buffering from the moment of a seek until it has the frame. If that
         // takes unusually long, send the newest target anyway rather than freeze the preview.
         val busy = player.playbackState == Player.STATE_BUFFERING &&
@@ -64,6 +65,9 @@ class Scrubber(private val player: ExoPlayer) {
         waiting = null
         player.setSeekParameters(SeekParameters.EXACT)
         targetMillis?.let { player.seekTo(it) }
+        playback.scrubTargetMillis = null
+        // Show where the scrub landed now, not the stale frame from before the next poll.
+        playback.sync(player)
         if (resume) player.play()
     }
 
@@ -75,8 +79,8 @@ class Scrubber(private val player: ExoPlayer) {
 }
 
 @Composable
-fun rememberScrubber(player: ExoPlayer): Scrubber {
-    val scrubber = remember(player) { Scrubber(player) }
+fun rememberScrubber(player: ExoPlayer, playback: PlaybackState): Scrubber {
+    val scrubber = remember(player, playback) { Scrubber(player, playback) }
     DisposableEffect(scrubber) {
         player.addListener(scrubber.listener)
         onDispose {
