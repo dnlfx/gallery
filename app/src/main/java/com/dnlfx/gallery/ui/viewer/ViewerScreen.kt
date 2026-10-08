@@ -131,7 +131,7 @@ fun ViewerScreen(
     DisposableEffect(player) { onDispose { player.release() } }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
     val playback = rememberPlaybackState(player)
-    val scrubber = rememberScrubber(player)
+    val scrubber = rememberScrubber(player, playback)
 
     // Chosen speed carries over from one video to the next until the viewer is closed.
     var speed by rememberSaveable { mutableFloatStateOf(1f) }

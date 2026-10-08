@@ -61,6 +61,15 @@ fun scrubStep(positionMillis: Float, dragDp: Float, speedDpPerSecond: Float, dur
 }
 
 /**
+ * Whether scrub previews show the exact frame rather than the nearest keyframe. Phones record a
+ * keyframe about once a second, so on a short clip, where a slow slide moves only milliseconds,
+ * keyframe previews would hold one picture and then jump a whole second. Exact frames cost a
+ * little decoding, which a short clip easily affords. On long videos a slide moves seconds at a
+ * time anyway, so keyframes keep the preview quick. Unknown lengths use keyframes.
+ */
+fun scrubsExactly(durationMillis: Long): Boolean = durationMillis in 1..EXACT_SCRUB_MAX_MILLIS
+
+/**
  * New volume as a 0..1 fraction after an upward slide of [dragUp] pixels; sliding the full
  * [height] of the screen goes from silent to full.
  */
@@ -74,3 +83,4 @@ private const val MAX_SCRUB_MILLIS_PER_DP = 250f
 private const val SLOW_SLIDE_DP_PER_SECOND = 400f
 private const val FAST_SLIDE_DP_PER_SECOND = 2_500f
 private const val MAX_SCRUB_GAIN = 3f
+private const val EXACT_SCRUB_MAX_MILLIS = 180_000L

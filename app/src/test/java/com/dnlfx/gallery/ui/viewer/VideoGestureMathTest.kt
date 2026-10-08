@@ -53,6 +53,15 @@ class VideoGestureMathTest {
     }
 
     @Test
+    fun shortClipsPreviewExactFrames() {
+        assertEquals(true, scrubsExactly(20_000))
+        assertEquals(true, scrubsExactly(180_000))
+        assertEquals(false, scrubsExactly(600_000))
+        assertEquals(false, scrubsExactly(0))
+        assertEquals(false, scrubsExactly(-9_223_372_036_854_775_807L))
+    }
+
+    @Test
     fun volumeFollowsVerticalSlides() {
         assertEquals(0.75f, volumeAfterDrag(0.5f, 500f, 2000f), 0.0001f)
         assertEquals(1f, volumeAfterDrag(0.5f, 5000f, 2000f), 0.0001f)
