@@ -174,7 +174,7 @@ fun ViewerScreen(
             player.clearMediaItems()
         } else {
             val (width, height) = uprightSize(video.width, video.height, video.orientationDegrees)
-            playback.resetForNewItem(width, height)
+            playback.resetForNewItem(video.id, width, height)
             player.setMediaItem(PlayerMediaItem.fromUri(video.uri))
             player.prepare()
             player.playWhenReady = true

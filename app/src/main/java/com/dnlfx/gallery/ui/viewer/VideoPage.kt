@@ -7,6 +7,7 @@ import android.view.SurfaceView
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -187,10 +188,31 @@ fun VideoPage(
         playFeedback = null
     }
 
+    // The page is on screen a moment before the player is handed this video. Until then the
+    // player still holds the last one, and would draw its frames into this page's surface.
+    val playerOnThisVideo = playback.itemId == item.id
+    var surfaceView by remember { mutableStateOf<SurfaceView?>(null) }
+    DisposableEffect(surfaceView, playerOnThisVideo) {
+        val view = surfaceView
+        if (view == null || !playerOnThisVideo) return@DisposableEffect onDispose {}
+        player.setVideoSurfaceView(view)
+        onDispose { player.clearVideoSurfaceView(view) }
+    }
+    // The thumbnail covers the surface, which stays black until the first frame. It then fades
+    // away rather than vanishing, so the switch from thumbnail to video doesn't flicker: the
+    // thumbnail can be a different frame, and the video may be in HDR.
+    val frameShown = playerOnThisVideo && playback.firstFrameRendered
+    val posterAlpha = animateFloatAsState(
+        targetValue = if (frameShown) 0f else 1f,
+        animationSpec = tween(POSTER_FADE_MILLIS),
+        label = "poster",
+    )
+    val posterVisible by remember { derivedStateOf { posterAlpha.value > 0f } }
+
     // The viewer behind draws the black backdrop, which fades out as the video is pulled down.
     Box(modifier.fillMaxSize().onSizeChanged { pageHeight = it.height }) {
         AndroidView(
-            factory = { ctx -> SurfaceView(ctx).also(player::setVideoSurfaceView) },
+            factory = { ctx -> SurfaceView(ctx).also { surfaceView = it } },
             // A SurfaceView follows its view's scale and position, so zooming and pulling down to
             // close cost nothing extra. It shrinks a little as it's pulled, like a photo.
             update = {
@@ -209,7 +231,6 @@ fun VideoPage(
                 it.translationX = zoom.x
                 it.translationY = zoom.y + dismissOffset
             },
-            onRelease = { player.clearVideoSurfaceView(it) },
             modifier = Modifier
                 .align(Alignment.Center)
                 .onSizeChanged { videoSize = it }
@@ -221,11 +242,11 @@ fun VideoPage(
                     },
                 ),
         )
-        // The surface stays black until the first frame, so cover it with the thumbnail until then.
-        if (!playback.firstFrameRendered) {
+        if (posterVisible) {
             VideoPoster(
                 item,
                 Modifier.graphicsLayer {
+                    alpha = posterAlpha.value
                     val shrink = 1f - DISMISS_SHRINK * dismissProgress()
                     scaleX = shrink
                     scaleY = shrink
@@ -659,4 +680,5 @@ private data class SkipFeedback(val forward: Boolean, val seconds: Int)
 private data class ScrubFeedback(val targetMillis: Long, val deltaMillis: Long, val durationMillis: Long)
 
 private const val FEEDBACK_MILLIS = 700L
+private const val POSTER_FADE_MILLIS = 150
 

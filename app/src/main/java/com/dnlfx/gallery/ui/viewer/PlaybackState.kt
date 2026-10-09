@@ -53,6 +53,10 @@ class PlaybackState {
     var firstFrameRendered by mutableStateOf(false)
         internal set
 
+    /** The video the player has been given, or null before the first. */
+    var itemId by mutableStateOf<Long?>(null)
+        internal set
+
     /** The player gave up on this video, for example a codec the phone can't decode. */
     var failed by mutableStateOf(false)
         internal set
@@ -62,7 +66,8 @@ class PlaybackState {
      * knows it, so the picture can be laid out at its own shape before the player has read the
      * file; 0 if unknown.
      */
-    internal fun resetForNewItem(width: Int, height: Int) {
+    internal fun resetForNewItem(id: Long, width: Int, height: Int) {
+        itemId = id
         firstFrameRendered = false
         setFrame(width, height, pixelRatio = 1f)
         playerPositionMillis = 0L
