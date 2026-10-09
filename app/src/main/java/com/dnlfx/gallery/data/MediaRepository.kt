@@ -6,10 +6,12 @@ import android.content.Context
 import android.database.ContentObserver
 import android.database.Cursor
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.BaseColumns
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.awaitClose
@@ -37,11 +39,20 @@ class MediaRepository(context: Context) {
      * Emits the full library now and again whenever MediaStore reports a change. A burst of
      * changes (a camera burst, a folder copied in) re-reads the library once, not once per file.
      */
+    fun observeMedia(): Flow<List<MediaItem>> = observe(::queryAll)
+
+    /**
+     * Emits what's in the system trash, most recently trashed first, and again whenever it
+     * changes. Always empty before Android 11, which has no trash.
+     */
+    fun observeTrash(): Flow<List<MediaItem>> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) observe(::queryTrash) else flowOf(emptyList())
+
     @OptIn(FlowPreview::class)
-    fun observeMedia(): Flow<List<MediaItem>> =
+    private fun observe(query: () -> List<MediaItem>): Flow<List<MediaItem>> =
         merge(flowOf(Unit), mediaStoreChanges().debounce(CHANGE_DEBOUNCE_MILLIS))
             .conflate()
-            .map { queryAll() }
+            .map { query() }
             .flowOn(Dispatchers.IO)
 
     private fun mediaStoreChanges(): Flow<Unit> = callbackFlow {
@@ -55,31 +66,47 @@ class MediaRepository(context: Context) {
     }
 
     fun queryAll(): List<MediaItem> {
-        val projection = arrayOf(
-            BaseColumns._ID,
-            MediaStore.Files.FileColumns.MEDIA_TYPE,
-            MediaStore.MediaColumns.MIME_TYPE,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.DATE_MODIFIED,
-            MediaStore.MediaColumns.DATE_TAKEN,
-            MediaStore.MediaColumns.DURATION,
-            MediaStore.MediaColumns.WIDTH,
-            MediaStore.MediaColumns.HEIGHT,
-            MediaStore.MediaColumns.ORIENTATION,
-            MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.RELATIVE_PATH,
-        ) + favoriteColumn()
-        val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
-        val selectionArgs = arrayOf(
-            MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
-            MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
-        )
-        val sortOrder = "${MediaStore.MediaColumns.DATE_MODIFIED} DESC, ${BaseColumns._ID} DESC"
-
-        val cursor = resolver.query(filesUri, projection, selection, selectionArgs, sortOrder)
+        val cursor = resolver.query(filesUri, projection(), SELECTION, selectionArgs(), SORT_NEWEST_MODIFIED)
             ?: return emptyList()
         return cursor.use { it.toMediaItems() }
     }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    fun queryTrash(): List<MediaItem> {
+        val args = Bundle().apply {
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, SELECTION)
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs())
+            // The trash keeps items 30 days, so the latest to expire went in most recently.
+            putString(
+                ContentResolver.QUERY_ARG_SQL_SORT_ORDER,
+                "${MediaStore.MediaColumns.DATE_EXPIRES} DESC, ${BaseColumns._ID} DESC",
+            )
+            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+        }
+        val projection = projection() + MediaStore.MediaColumns.DATE_EXPIRES
+        val cursor = resolver.query(filesUri, projection, args, null) ?: return emptyList()
+        return cursor.use { it.toMediaItems() }
+    }
+
+    private fun projection(): Array<String> = arrayOf(
+        BaseColumns._ID,
+        MediaStore.Files.FileColumns.MEDIA_TYPE,
+        MediaStore.MediaColumns.MIME_TYPE,
+        MediaStore.MediaColumns.DISPLAY_NAME,
+        MediaStore.MediaColumns.DATE_MODIFIED,
+        MediaStore.MediaColumns.DATE_TAKEN,
+        MediaStore.MediaColumns.DURATION,
+        MediaStore.MediaColumns.WIDTH,
+        MediaStore.MediaColumns.HEIGHT,
+        MediaStore.MediaColumns.ORIENTATION,
+        MediaStore.MediaColumns.SIZE,
+        MediaStore.MediaColumns.RELATIVE_PATH,
+    ) + favoriteColumn()
+
+    private fun selectionArgs(): Array<String> = arrayOf(
+        MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
+        MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString(),
+    )
 
     private fun Cursor.toMediaItems(): List<MediaItem> {
         val idCol = getColumnIndexOrThrow(BaseColumns._ID)
@@ -95,6 +122,8 @@ class MediaRepository(context: Context) {
         val sizeCol = getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
         val pathCol = getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
         val favoriteCol = favoriteColumn().firstOrNull()?.let(::getColumnIndex) ?: -1
+        // Only asked for when reading the trash.
+        val expiresCol = getColumnIndex(MediaStore.MediaColumns.DATE_EXPIRES)
 
         val items = ArrayList<MediaItem>(count)
         while (moveToNext()) {
@@ -115,6 +144,7 @@ class MediaRepository(context: Context) {
                 sizeBytes = getLong(sizeCol),
                 relativePath = getStringOrNull(pathCol),
                 isFavorite = favoriteCol >= 0 && getInt(favoriteCol) == 1,
+                dateExpiresSeconds = if (expiresCol >= 0) getLongOrNull(expiresCol) else null,
             )
         }
         return items
@@ -122,6 +152,8 @@ class MediaRepository(context: Context) {
 
     private companion object {
         const val CHANGE_DEBOUNCE_MILLIS = 300L
+        const val SELECTION = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
+        const val SORT_NEWEST_MODIFIED = "${MediaStore.MediaColumns.DATE_MODIFIED} DESC, ${BaseColumns._ID} DESC"
     }
 
     /** The favorite flag MediaStore keeps from Android 11 on, or nothing before that. */

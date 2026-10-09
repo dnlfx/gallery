@@ -24,4 +24,6 @@ data class MediaItem(
     val relativePath: String? = null,
     /** Starred in Photos, Files or another app. Always false before Android 11. */
     val isFavorite: Boolean = false,
+    /** For an item in the trash: when the system deletes it for good, in seconds since the epoch. */
+    val dateExpiresSeconds: Long? = null,
 )
