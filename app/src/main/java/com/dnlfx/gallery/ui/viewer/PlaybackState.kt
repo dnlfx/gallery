@@ -68,10 +68,12 @@ class PlaybackState {
     }
 }
 
+/** Follows [player], or stays idle while there's no player yet. */
 @Composable
-fun rememberPlaybackState(player: Player): PlaybackState {
+fun rememberPlaybackState(player: Player?): PlaybackState {
     val state = remember(player) { PlaybackState() }
     DisposableEffect(player) {
+        if (player == null) return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 state.sync(player)
@@ -101,6 +103,7 @@ fun rememberPlaybackState(player: Player): PlaybackState {
     // a pause, the end) arrives as an event, so a photo, a paused video or the app in the
     // background wakes nothing up.
     LaunchedEffect(player) {
+        if (player == null) return@LaunchedEffect
         snapshotFlow { state.isPlaying }.collectLatest { playing ->
             while (playing) {
                 state.sync(player)

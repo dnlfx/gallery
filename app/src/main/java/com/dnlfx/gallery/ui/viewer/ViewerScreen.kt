@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -69,12 +70,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
 import androidx.media3.common.Player
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.EXTERNAL_ITEM_ID
 import com.dnlfx.gallery.data.MediaItem
@@ -89,7 +85,6 @@ import java.util.Date
 import androidx.media3.common.MediaItem as PlayerMediaItem
 
 private const val CONTROLS_HIDE_MILLIS = 3_000L
-private const val LOCAL_START_BUFFER_MILLIS = 250
 
 /**
  * Full-screen viewer. Swipe sideways between items in grid order; photos zoom, videos play with
@@ -141,48 +136,26 @@ fun ViewerScreen(
         }
     }
 
-    val player = remember {
-        // If the phone's preferred decoder can't take a file (an unusual HEVC profile, say),
-        // try the next one instead of failing.
-        val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
-        ExoPlayer.Builder(context, renderers)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                    .build(),
-                /* handleAudioFocus = */ true,
-            )
-            .setHandleAudioBecomingNoisy(true)
-            // Everything plays from the phone's own storage, which reads far faster than playback
-            // needs, so start (and restart after a seek or scrub) once a quarter second is ready
-            // instead of the default full second.
-            .setLoadControl(
-                DefaultLoadControl.Builder()
-                    .setBufferDurationsMsForLocalPlayback(
-                        DefaultLoadControl.DEFAULT_MIN_BUFFER_FOR_LOCAL_PLAYBACK_MS,
-                        DefaultLoadControl.DEFAULT_MAX_BUFFER_FOR_LOCAL_PLAYBACK_MS,
-                        LOCAL_START_BUFFER_MILLIS,
-                        LOCAL_START_BUFFER_MILLIS,
-                    )
-                    .build(),
-            )
-            .build()
-    }
-    DisposableEffect(player) { onDispose { player.release() } }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
+    val video = settledItem?.takeIf { it.type == MediaType.VIDEO }
+    // Making a player loads the whole video stack, so a viewer opened on a photo doesn't make one
+    // until it first reaches a video. From then on it stays until the viewer closes, so swiping
+    // between photos and videos doesn't keep rebuilding it.
+    var playerNeeded by remember { mutableStateOf(false) }
+    if (video != null && !playerNeeded) SideEffect { playerNeeded = true }
+    val player = if (playerNeeded || video != null) rememberViewerPlayer() else null
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player?.pause() }
     val playback = rememberPlaybackState(player)
-    val scrubber = rememberScrubber(player, playback)
+    val scrubber = player?.let { rememberScrubber(it, playback) }
 
     // Chosen speed carries over from one video to the next until the viewer is closed.
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
-    LaunchedEffect(speed) { player.setPlaybackSpeed(speed) }
+    LaunchedEffect(speed, player) { player?.setPlaybackSpeed(speed) }
     // Looping is a lasting choice: it applies to every video until it's turned off again.
     var loop by rememberLoopVideos()
-    LaunchedEffect(loop) { player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
+    LaunchedEffect(loop, player) { player?.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
 
-    val video = settledItem?.takeIf { it.type == MediaType.VIDEO }
-    LaunchedEffect(video?.id) {
+    LaunchedEffect(video?.id, player) {
+        if (player == null) return@LaunchedEffect
         if (video == null) {
             player.stop()
             player.clearMediaItems()
@@ -248,7 +221,7 @@ fun ViewerScreen(
                     onDismissProgress = { dismissProgress = it },
                     onDismiss = onClose,
                 )
-                MediaType.VIDEO -> if (onCurrentPage && item.id == video?.id) {
+                MediaType.VIDEO -> if (onCurrentPage && item.id == video?.id && player != null && scrubber != null) {
                     VideoPage(
                         item = item,
                         player = player,
@@ -278,7 +251,7 @@ fun ViewerScreen(
                     onBack = onClose,
                     onInfo = { detailsOpen = true },
                     // Offered while a video is paused on the frame to keep.
-                    onSaveFrame = if (video != null && item.id == video.id && (!playback.playWhenReady || playback.ended)) {
+                    onSaveFrame = if (video != null && player != null && item.id == video.id && (!playback.playWhenReady || playback.ended)) {
                         {
                             val position = player.currentPosition
                             scope.launch {
@@ -317,7 +290,7 @@ fun ViewerScreen(
             }
         }
 
-        if (video != null) {
+        if (video != null && player != null && scrubber != null) {
             AnimatedVisibility(
                 visible = controlsVisible,
                 enter = fadeIn(),
