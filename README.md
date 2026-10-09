@@ -94,7 +94,8 @@ change at a time, Reset goes back to the start, and holding the compare button s
 - Saving an edited photo replaces the original, after the system asks for permission (Android 11
   and later). It's rendered from the original at full resolution and saved at the best quality
   the format allows: PNG and WebP losslessly, JPEG at quality 100. A crop alone is cut pixel for
-  pixel. The date taken, camera details and location carry over. Formats the phone can't write
+  pixel. The date taken, camera details and location carry over, and on Android 14 and later an
+  Ultra HDR photo stays HDR whatever the edit. Formats the phone can't write
   back (HEIC, AVIF, RAW), files other apps handed over, and Android 10 get a new copy instead,
   which keeps the same details. The original is copied aside first and put back if the save
   fails partway, and a phone too full to hold both stops before anything changes. A photo save
