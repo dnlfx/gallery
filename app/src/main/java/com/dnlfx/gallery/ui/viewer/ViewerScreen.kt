@@ -164,6 +164,9 @@ fun ViewerScreen(
     // Chosen speed carries over from one video to the next until the viewer is closed.
     var speed by rememberSaveable { mutableFloatStateOf(1f) }
     LaunchedEffect(speed) { player.setPlaybackSpeed(speed) }
+    // Looping is a lasting choice: it applies to every video until it's turned off again.
+    var loop by rememberLoopVideos()
+    LaunchedEffect(loop) { player.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
 
     val video = settledItem?.takeIf { it.type == MediaType.VIDEO }
     LaunchedEffect(video?.id) {
@@ -320,6 +323,8 @@ fun ViewerScreen(
                         speed = it
                         interactions++
                     },
+                    loop = loop,
+                    onLoopChange = { loop = it },
                     onSeek = {
                         val target = clampPosition(it, playback.durationMillis)
                         // A drag along the bar previews like a scrub; a tap jumps straight there.
