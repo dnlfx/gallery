@@ -18,12 +18,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -74,8 +71,9 @@ fun PlayPauseButton(playing: Boolean, onClick: () -> Unit, modifier: Modifier = 
 }
 
 /**
- * The bottom strip while controls are shown: current time, a thin seek bar, the length, the speed
- * button and previous and next arrows. It sits on a faint gradient so most of the frame stays visible.
+ * The bottom strip while controls are shown: current time, a thin seek bar, the length and the
+ * speed button. It sits on a faint gradient so most of the frame stays visible. Swipes move between
+ * items, so there are no arrows.
  */
 @Composable
 fun VideoBottomBar(
@@ -85,10 +83,6 @@ fun VideoBottomBar(
     onSeek: (Long) -> Unit,
     onSeekStart: () -> Unit,
     onSeekEnd: () -> Unit,
-    hasPrevious: Boolean,
-    hasNext: Boolean,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
     onInteraction: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -108,16 +102,10 @@ fun VideoBottomBar(
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            // The speed button carries its own inner padding at the end.
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onPrevious, enabled = hasPrevious) {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = stringResource(R.string.viewer_previous),
-                    tint = if (hasPrevious) Color.White else Color.White.copy(alpha = 0.3f),
-                )
-            }
             TimeLabel(formatDuration(playback.positionMillis))
             ThinSeekBar(
                 positionMillis = playback.positionMillis,
@@ -138,13 +126,6 @@ fun VideoBottomBar(
                     text = formatSpeed(speed),
                     color = Color.White,
                     fontWeight = if (speed != 1f) FontWeight.Bold else FontWeight.Normal,
-                )
-            }
-            IconButton(onClick = onNext, enabled = hasNext) {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = stringResource(R.string.viewer_next),
-                    tint = if (hasNext) Color.White else Color.White.copy(alpha = 0.3f),
                 )
             }
         }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -93,7 +95,8 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
  * - tap anywhere to show or hide the controls;
  * - double-tap the left third to go back 10 seconds, the right third to go forward 10 seconds,
  *   and keep tapping that side to add 10 more each time; double-tap the middle to play or pause;
- * - slide sideways anywhere to scrub through the video;
+ * - swipe sideways to move to the previous or next item, like on a photo;
+ * - press and hold for a moment, then slide sideways, to scrub through the video;
  * - slide up or down to change the volume;
  * - pinch to zoom; while zoomed in, one finger moves the picture instead of scrubbing.
  *
@@ -105,9 +108,11 @@ fun VideoPage(
     player: ExoPlayer,
     scrubber: Scrubber,
     playback: PlaybackState,
+    controlsVisible: Boolean,
     onToggleControls: () -> Unit,
     onTogglePlay: () -> Unit,
     onInteraction: () -> Unit,
+    onZoomedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -127,6 +132,11 @@ fun VideoPage(
     var playToken by remember { mutableIntStateOf(0) }
     var zoom by remember(item.id) { mutableStateOf(VideoZoom()) }
     var videoSize by remember { mutableStateOf(IntSize.Zero) }
+    // While zoomed in, a swipe moves the picture rather than turning to the next item.
+    val zoomedChanged by rememberUpdatedState(onZoomedChange)
+    LaunchedEffect(zoom.zoomed) { zoomedChanged(zoom.zoomed) }
+    // If this page goes away while zoomed in, swipes must not stay off for whatever comes next.
+    DisposableEffect(Unit) { onDispose { zoomedChanged(false) } }
 
     LaunchedEffect(skipToken) {
         delay(FEEDBACK_MILLIS)
@@ -228,11 +238,29 @@ fun VideoPage(
                         val startVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC) / maxVolume.toFloat()
                         var released = false
                         var upMillis = 0L
+                        var lastMillis = down.uptimeMillis
                         velocity.addPosition(down.uptimeMillis, down.position)
 
                         try {
                             while (true) {
-                                val event = awaitPointerEvent()
+                                // Until the finger moves, wait to see whether it's held still long
+                                // enough to start scrubbing.
+                                val event = if (mode == DragMode.NONE && !multiTouch && !zoom.zoomed) {
+                                    val holdLeft = viewConfiguration.longPressTimeoutMillis - (lastMillis - down.uptimeMillis)
+                                    withTimeoutOrNull(holdLeft.coerceAtLeast(0L)) { awaitPointerEvent() }
+                                } else {
+                                    awaitPointerEvent()
+                                }
+                                if (event == null) {
+                                    mode = DragMode.SCRUB
+                                    interacted()
+                                    startPosition = player.currentPosition
+                                    scrubPosition = startPosition.toFloat()
+                                    scrubber.begin()
+                                    scrub = ScrubFeedback(startPosition, 0L, duration)
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    continue
+                                }
                                 if (event.changes.count { it.pressed } > 1) {
                                     multiTouch = true
                                     if (mode == DragMode.NONE) {
@@ -246,28 +274,20 @@ fun VideoPage(
                                     upMillis = change.uptimeMillis
                                     break
                                 }
+                                lastMillis = change.uptimeMillis
                                 velocity.addPosition(change.uptimeMillis, change.position)
                                 total += change.positionChange()
-                                var engagedNow = false
                                 if (mode == DragMode.NONE && !multiTouch && total.getDistance() > viewConfiguration.touchSlop) {
                                     mode = when {
                                         zoom.zoomed -> DragMode.PAN
-                                        abs(total.x) > abs(total.y) -> DragMode.SCRUB
+                                        // A swipe straight away is for the pager: leave it unconsumed.
+                                        abs(total.x) > abs(total.y) -> DragMode.SWIPE
                                         else -> DragMode.VOLUME
                                     }
-                                    interacted()
-                                    if (mode == DragMode.SCRUB) {
-                                        engagedNow = true
-                                        startPosition = player.currentPosition
-                                        scrubPosition = startPosition.toFloat()
-                                        scrubber.begin()
-                                        scrub = ScrubFeedback(startPosition, 0L, duration)
-                                    }
+                                    if (mode != DragMode.SWIPE) interacted()
                                 }
                                 when (mode) {
-                                    // The slide that crossed the touch slop only decides the mode, so
-                                    // the video doesn't jump the moment scrubbing starts.
-                                    DragMode.SCRUB -> if (!engagedNow) {
+                                    DragMode.SCRUB -> {
                                         val previous = scrubPosition
                                         scrubPosition = scrubStep(
                                             positionMillis = previous,
@@ -316,9 +336,9 @@ fun VideoPage(
                                         val pan = change.positionChange()
                                         zoom = zoom.panned(pan.x, pan.y, videoSize.toZoomSize(), size.toZoomSize())
                                     }
-                                    DragMode.NONE -> Unit
+                                    DragMode.NONE, DragMode.SWIPE -> Unit
                                 }
-                                if (mode != DragMode.NONE) change.consume()
+                                if (mode != DragMode.NONE && mode != DragMode.SWIPE) change.consume()
                             }
                         } finally {
                             // Also runs if the gesture is cut short, so playback always resumes.
@@ -373,7 +393,9 @@ fun VideoPage(
                     .padding(horizontal = 48.dp),
             )
         }
-        playFeedback?.let { playing ->
+        // With the controls up, the play button in the middle already flips to show the new state,
+        // so a second icon on top of it would only clash with it.
+        playFeedback?.takeUnless { controlsVisible }?.let { playing ->
             Pill(Modifier.align(Alignment.Center)) {
                 Icon(
                     imageVector = if (playing) Icons.Filled.PlayArrow else ViewerIcons.Pause,
@@ -384,7 +406,9 @@ fun VideoPage(
             }
         }
         scrub?.let { feedback ->
-            Pill(Modifier.align(Alignment.Center)) {
+            // Sits above the play button when the controls are up, so the two don't overlap.
+            val clearOfButton = if (controlsVisible) Modifier.offset(y = (-88).dp) else Modifier
+            Pill(Modifier.align(Alignment.Center).then(clearOfButton)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "${formatDuration(feedback.targetMillis)} / ${formatDuration(feedback.durationMillis)}",
@@ -487,7 +511,7 @@ private fun Pill(modifier: Modifier = Modifier, content: @Composable () -> Unit)
     }
 }
 
-private enum class DragMode { NONE, SCRUB, VOLUME, ZOOM, PAN }
+private enum class DragMode { NONE, SCRUB, VOLUME, ZOOM, PAN, SWIPE }
 
 private fun IntSize.toZoomSize() = VideoZoom.Size(width.toFloat(), height.toFloat())
 

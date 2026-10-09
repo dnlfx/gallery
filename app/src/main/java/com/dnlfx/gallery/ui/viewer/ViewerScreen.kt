@@ -185,6 +185,7 @@ fun ViewerScreen(
     val trash = rememberTrashRequest()
     var interactions by remember { mutableIntStateOf(0) }
     var draggingSeekBar by remember { mutableStateOf(false) }
+    var videoZoomed by remember { mutableStateOf(false) }
     LaunchedEffect(controlsVisible, playback.isPlaying, interactions, draggingSeekBar, video?.id) {
         if (controlsVisible && video != null && playback.isPlaying && !draggingSeekBar) {
             delay(CONTROLS_HIDE_MILLIS)
@@ -214,8 +215,9 @@ fun ViewerScreen(
             state = pagerState,
             key = { latestItems[it].id },
             beyondViewportPageCount = 1,
-            // On a video, sideways slides scrub; the arrows in its controls move between items.
-            userScrollEnabled = settledItem?.type != MediaType.VIDEO,
+            // Swipes turn the page on videos too (holding first scrubs instead), except while a
+            // video is zoomed in and a swipe moves the picture.
+            userScrollEnabled = !videoZoomed,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             val item = latestItems[page]
@@ -234,9 +236,11 @@ fun ViewerScreen(
                         player = player,
                         scrubber = scrubber,
                         playback = playback,
+                        controlsVisible = controlsVisible,
                         onToggleControls = { controlsVisible = !controlsVisible },
                         onTogglePlay = { togglePlayback(player) },
                         onInteraction = { interactions++ },
+                        onZoomedChange = { videoZoomed = it },
                     )
                 } else {
                     VideoPoster(item)
@@ -309,7 +313,6 @@ fun ViewerScreen(
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                val page = pagerState.settledPage
                 VideoBottomBar(
                     playback = playback,
                     speed = speed,
@@ -330,10 +333,6 @@ fun ViewerScreen(
                         draggingSeekBar = false
                         scrubber.finish()
                     },
-                    hasPrevious = page > 0,
-                    hasNext = page < items.lastIndex,
-                    onPrevious = { scope.launch { pagerState.animateScrollToPage(page - 1) } },
-                    onNext = { scope.launch { pagerState.animateScrollToPage(page + 1) } },
                     onInteraction = { interactions++ },
                     modifier = Modifier.windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
