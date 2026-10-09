@@ -174,13 +174,14 @@ fun HairlineProgress(playback: PlaybackState, modifier: Modifier = Modifier) {
             )
             .padding(horizontal = 24.dp, vertical = 12.dp)
             .fillMaxWidth()
-            .height(3.dp),
+            .height(2.dp),
     ) {
         // Read while drawing, so progress only redraws the line.
         val fraction = progressFraction(playback.positionMillis, playback.durationMillis)
         val round = CornerRadius(size.height / 2f)
-        drawRoundRect(Color.White.copy(alpha = 0.25f), cornerRadius = round)
-        drawRoundRect(Color.White.copy(alpha = 0.8f), size = size.copy(width = size.width * fraction), cornerRadius = round)
+        // Faint, so it blends into the video without disappearing on bright scenes.
+        drawRoundRect(Color.White.copy(alpha = 0.15f), cornerRadius = round)
+        drawRoundRect(Color.White.copy(alpha = 0.5f), size = size.copy(width = size.width * fraction), cornerRadius = round)
     }
 }
 
