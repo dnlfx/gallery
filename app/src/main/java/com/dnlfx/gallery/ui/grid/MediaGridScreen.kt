@@ -155,7 +155,8 @@ fun MediaGridScreen(
             )
             Column(Modifier.background(barColor)) {
                 if (selecting) {
-                    val selectedItems = shown.orEmpty().filter { it.id in selection }
+                    // The bar recomposes on every frame of its colour change; walk the library once.
+                    val selectedItems = remember(shown, selection) { shown.orEmpty().filter { it.id in selection } }
                     SelectionTopBar(
                         count = selection.size,
                         allFavorite = selectedItems.isNotEmpty() && selectedItems.all { it.isFavorite },

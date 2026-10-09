@@ -50,7 +50,12 @@ private fun writeToPictures(context: Context, name: String, frame: Bitmap): Bool
         put(MediaStore.Images.Media.IS_PENDING, 1)
     }
     val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-    val uri = resolver.insert(collection, values) ?: return false
+    // Storage that's full or not ready refuses the new file; say so rather than closing the app.
+    val uri = try {
+        resolver.insert(collection, values)
+    } catch (e: Exception) {
+        null
+    } ?: return false
     val written = try {
         resolver.openOutputStream(uri)?.use { frame.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it) } == true
     } catch (e: Exception) {
@@ -60,8 +65,13 @@ private fun writeToPictures(context: Context, name: String, frame: Bitmap): Bool
         resolver.delete(uri, null, null)
         return false
     }
-    resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
-    return true
+    return try {
+        resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+        true
+    } catch (e: Exception) {
+        resolver.delete(uri, null, null)
+        false
+    }
 }
 
 /** "PXL_20261008_101500123_frame_01-23-456.jpg" for a frame at 1:23.456. */

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.net.Uri
+import android.util.Log
 import android.view.TextureView
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -86,6 +87,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -97,11 +100,15 @@ import com.dnlfx.gallery.ui.rememberMediaRequests
 import com.dnlfx.gallery.ui.viewer.VideoPoster
 import com.dnlfx.gallery.ui.viewer.ViewerIcons
 import com.dnlfx.gallery.ui.viewer.rememberPlaybackState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.math.roundToInt
 import androidx.media3.common.MediaItem as PlayerMediaItem
 
@@ -191,12 +198,28 @@ private class SaveState {
     /** 0 to 1 when the save reports progress, null when it doesn't (or hasn't yet). */
     var progress by mutableStateOf<Float?>(null)
 
-    fun start(scope: CoroutineScope, save: suspend () -> Unit) {
+    /** False while a save is running that has to finish once started, like writing over a photo. */
+    var canStop by mutableStateOf(true)
+        private set
+
+    /**
+     * Runs [save]. One that isn't [stoppable] runs to the end even if the editor closes, so it
+     * never stops halfway with the file changed but the editor still showing the old edit, which
+     * a second save would apply again on top. A save that fails unexpectedly says so instead of
+     * closing the app.
+     */
+    fun start(scope: CoroutineScope, context: Context, stoppable: Boolean, save: suspend () -> Unit) {
         if (job != null) return
         progress = null
+        canStop = stoppable
         job = scope.launch {
             try {
-                save()
+                withContext(if (stoppable) EmptyCoroutineContext else NonCancellable) { save() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("EditorScreen", "Save failed", e)
+                Toast.makeText(context, R.string.editor_save_failed, Toast.LENGTH_SHORT).show()
             } finally {
                 job = null
             }
@@ -204,7 +227,7 @@ private class SaveState {
     }
 
     fun cancel() {
-        job?.cancel()
+        if (canStop) job?.cancel()
     }
 }
 
@@ -237,13 +260,13 @@ private fun PhotoEditor(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> 
             if (overwrite) {
                 // The system asks before the original is changed; nothing happens if it's declined.
                 requests.write(listOf(item.uri)) {
-                    saving.start(scope) {
+                    saving.start(scope, context, stoppable = false) {
                         val saved = overwriteWithEdit(context, item, edit)
                         finishSave(context, if (saved) item.uri else null, R.string.editor_saved, onSaved)
                     }
                 }
             } else {
-                saving.start(scope) {
+                saving.start(scope, context, stoppable = false) {
                     val uri = saveEditedPhoto(context, item, edit)
                     finishSave(context, uri, R.string.editor_saved_copy, onSaved)
                 }
@@ -273,12 +296,24 @@ private fun VideoEditor(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> 
     val scope = rememberCoroutineScope()
     val player = remember {
         val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
-        ExoPlayer.Builder(context, renderers).build().apply {
-            // Plays the kept part over and over (see below); this covers a trim that runs to the end.
-            repeatMode = Player.REPEAT_MODE_ONE
-            setMediaItem(PlayerMediaItem.fromUri(item.uri))
-            prepare()
-        }
+        ExoPlayer.Builder(context, renderers)
+            // Like the viewer: other apps' audio pauses while the preview plays, and unplugging
+            // headphones pauses it.
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                /* handleAudioFocus = */ true,
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+            .apply {
+                // Plays the kept part over and over (see below); this covers a trim that runs to the end.
+                repeatMode = Player.REPEAT_MODE_ONE
+                setMediaItem(PlayerMediaItem.fromUri(item.uri))
+                prepare()
+            }
     }
     DisposableEffect(player) { onDispose { player.release() } }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
@@ -327,7 +362,7 @@ private fun VideoEditor(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> 
         onSave = {
             if (range != null) {
                 player.pause()
-                saving.start(scope) {
+                saving.start(scope, context, stoppable = true) {
                     val edit = VideoEdit(
                         trim = range.takeUnless { it.isWhole(duration) },
                         crop = state.crop,
@@ -485,6 +520,7 @@ private fun EditorContent(
     }
 
     BackHandler {
+        // Back stops a save that can be stopped, and otherwise waits for it.
         if (saving.job != null) saving.cancel() else onClose()
     }
     val buttonColors = ButtonDefaults.textButtonColors(
@@ -637,7 +673,9 @@ private fun EditorContent(
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = saving::cancel) { Text(stringResource(R.string.editor_stop)) }
+                if (saving.canStop) {
+                    TextButton(onClick = saving::cancel) { Text(stringResource(R.string.editor_stop)) }
+                }
             },
         )
     }
