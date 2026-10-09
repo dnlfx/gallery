@@ -3,6 +3,7 @@ package com.dnlfx.gallery.ui.viewer
 import android.content.ContentUris
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -197,6 +198,7 @@ fun ViewerScreen(
     }
 
     SystemBarsEffect(visible = controlsVisible)
+    HdrEffect()
     DisposableEffect(playback.isPlaying) {
         view.keepScreenOn = playback.isPlaying
         onDispose { view.keepScreenOn = false }
@@ -475,20 +477,16 @@ private fun ViewerTopBar(
                 )
             }
         }
-        IconButton(onClick = onRotate) {
-            Icon(
-                ViewerIcons.ScreenRotation,
-                contentDescription = stringResource(R.string.viewer_rotate),
-                tint = Color.White,
-            )
-        }
-        ViewerMoreMenu(onEdit = onEdit, onInfo = onInfo)
+        ViewerMoreMenu(onEdit = onEdit, onInfo = onInfo, onRotate = onRotate)
     }
 }
 
-/** The overflow button: the editor and the details sheet, used less often than the buttons beside it. */
+/**
+ * The overflow button: the editor, the details sheet and turning the screen, used less often than
+ * the buttons beside it, which leaves the date and name room on a phone held upright.
+ */
 @Composable
-private fun ViewerMoreMenu(onEdit: (() -> Unit)?, onInfo: () -> Unit) {
+private fun ViewerMoreMenu(onEdit: (() -> Unit)?, onInfo: () -> Unit, onRotate: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -517,7 +515,31 @@ private fun ViewerMoreMenu(onEdit: (() -> Unit)?, onInfo: () -> Unit) {
                     onInfo()
                 },
             )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.viewer_rotate)) },
+                leadingIcon = { Icon(ViewerIcons.ScreenRotation, contentDescription = null) },
+                onClick = {
+                    open = false
+                    onRotate()
+                },
+            )
         }
+    }
+}
+
+/**
+ * Shows Ultra HDR photos (what a Pixel's camera saves) with their full brightness, like Photos,
+ * while the viewer is open. Ordinary photos and the rest of the app look the same.
+ */
+@Composable
+private fun HdrEffect() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+    val view = LocalView.current
+    val window = remember { view.context.findActivity()?.window } ?: return
+    DisposableEffect(window) {
+        val previous = window.colorMode
+        window.colorMode = ActivityInfo.COLOR_MODE_HDR
+        onDispose { window.colorMode = previous }
     }
 }
 

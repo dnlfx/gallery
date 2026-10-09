@@ -77,6 +77,36 @@ jobs:
             echo "The merged manifest requests network access"; exit 1
           fi
 
+      - name: Check the app asks for no permissions beyond photos and videos
+        run: |
+          # A library adding any other permission (network state, location, notifications...)
+          # fails the build until someone decides it belongs here.
+          manifest=app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
+          test -f "$manifest" || { echo "No merged release manifest found"; exit 1; }
+          python3 - "$manifest" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          name = "{http://schemas.android.com/apk/res/android}name"
+          found = sorted({e.get(name) for e in ET.parse(sys.argv[1]).getroot().iter()
+                          if e.tag.startswith("uses-permission")})
+          allowed = {
+              "android.permission.READ_MEDIA_IMAGES",
+              "android.permission.READ_MEDIA_VIDEO",
+              "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+              "android.permission.READ_EXTERNAL_STORAGE",
+              # Declared by a library (it was already in releases before this check). It only
+              # keeps the CPU awake; it reaches no data and nothing outside the phone.
+              "android.permission.WAKE_LOCK",
+              # AndroidX's own guard for receivers registered in code; signature-only.
+              "com.dnlfx.gallery.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
+          }
+          print("\n".join(found))
+          unexpected = [p for p in found if p not in allowed]
+          if unexpected:
+              print("::error::The app now asks for: " + ", ".join(unexpected))
+              sys.exit(1)
+          PY
+
       - name: Check the release APK is signed
         run: |
           apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/apksigner"

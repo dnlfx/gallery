@@ -83,8 +83,9 @@ suspend fun overwriteWithEdit(context: Context, item: MediaItem, edit: PhotoEdit
     } catch (e: OutOfMemoryError) {
         null
     } ?: return@withContext false
-    val folder = File(context.cacheDir, "edits").apply { mkdirs() }
+    val folder = editsFolder(context)
     val cropped = File(folder, "crop-${System.nanoTime()}")
+    val backup = File(folder, "original-${System.nanoTime()}")
     try {
         val encoded = try {
             cropped.outputStream().use { bitmap.compress(format, 100, it) }
@@ -93,17 +94,67 @@ suspend fun overwriteWithEdit(context: Context, item: MediaItem, edit: PhotoEdit
         }
         if (!encoded) return@withContext false
         copyMetadata(context, item.uri, cropped)
-        context.contentResolver.openOutputStream(item.uri, "wt")?.use { out ->
-            cropped.inputStream().use { it.copyTo(out) }
-        } ?: return@withContext false
+        val resolver = context.contentResolver
+        // Writing over the original can't be done in one step, so keep a copy of it until the new
+        // photo is fully in place, and put it back if anything goes wrong on the way.
+        resolver.openInputStream(item.uri)?.use { input -> backup.outputStream().use { input.copyTo(it) } }
+            ?: return@withContext false
+        // Room for the new photo even before the original's space is freed, so a nearly full
+        // phone stops here with the original untouched.
+        if (folder.usableSpace < cropped.length() + SPACE_MARGIN_BYTES) return@withContext false
+        try {
+            resolver.openOutputStream(item.uri, "wt")?.use { out ->
+                cropped.inputStream().use { it.copyTo(out) }
+            } ?: return@withContext false
+        } catch (e: Exception) {
+            Log.w(TAG, "Couldn't save over the original; putting it back", e)
+            restoreOriginal(context, item, backup)
+            return@withContext false
+        }
         forgetCachedImages(context, item.uri)
         true
     } catch (e: Exception) {
-        Log.w(TAG, "Couldn't save over ${item.uri}", e)
+        Log.w(TAG, "Couldn't save over the original", e)
         false
     } finally {
         cropped.delete()
+        backup.delete()
     }
+}
+
+/**
+ * Writes [backup] back over [item] after a failed save. If even that fails, the original goes in
+ * the library as a new photo, so it's never lost.
+ */
+private fun restoreOriginal(context: Context, item: MediaItem, backup: File) {
+    try {
+        context.contentResolver.openOutputStream(item.uri, "wt")?.use { out ->
+            backup.inputStream().use { it.copyTo(out) }
+        } ?: error("No output stream")
+    } catch (e: Exception) {
+        Log.w(TAG, "Couldn't put the original back; saving it as a copy", e)
+        insertMedia(
+            context = context,
+            isVideo = false,
+            name = item.displayName ?: "Gallery.jpg",
+            mimeType = item.mimeType ?: "image/jpeg",
+            originalFolder = item.relativePath,
+        ) { out ->
+            backup.inputStream().use { it.copyTo(out) }
+            true
+        }
+    }
+}
+
+/** Scratch space for edits in progress. Anything left in it from an earlier run can go. */
+private fun editsFolder(context: Context): File = File(context.cacheDir, EDITS_FOLDER).apply { mkdirs() }
+
+/**
+ * Removes edits a previous run left half done, such as a video export the app was closed in
+ * the middle of, which can be gigabytes. Call once when the app starts, before any edit begins.
+ */
+fun clearUnfinishedEdits(context: Context) {
+    File(context.cacheDir, EDITS_FOLDER).listFiles()?.forEach { it.deleteRecursively() }
 }
 
 /**
@@ -134,7 +185,8 @@ private fun forgetCachedImages(context: Context, uri: Uri) {
 
 /**
  * Saves [edit] of the photo [item] as a new photo next to it, at full resolution. PNGs (like
- * screenshots) stay lossless PNGs; everything else becomes a JPEG at quality 100. The original is
+ * screenshots) stay lossless PNGs; everything else becomes a JPEG at quality 100. The date taken,
+ * camera details and location carry over, as when saving over the original. The original is
  * never touched. Returns the new photo's uri, or null if it couldn't be saved.
  */
 suspend fun saveEditedPhoto(context: Context, item: MediaItem, edit: PhotoEdit): Uri? = withContext(Dispatchers.IO) {
@@ -143,8 +195,22 @@ suspend fun saveEditedPhoto(context: Context, item: MediaItem, edit: PhotoEdit):
     } catch (e: OutOfMemoryError) {
         null
     } ?: return@withContext null
+    val lossless = item.mimeType in LOSSLESS_TYPES
+    val encoded = File(editsFolder(context), "copy-${System.nanoTime()}")
     try {
-        val lossless = item.mimeType in LOSSLESS_TYPES
+        val written = try {
+            encoded.outputStream().use {
+                if (lossless) {
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                } else {
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it)
+                }
+            }
+        } finally {
+            bitmap.recycle()
+        }
+        if (!written) return@withContext null
+        copyMetadata(context, item.uri, encoded)
         insertMedia(
             context = context,
             isVideo = false,
@@ -152,14 +218,11 @@ suspend fun saveEditedPhoto(context: Context, item: MediaItem, edit: PhotoEdit):
             mimeType = if (lossless) "image/png" else "image/jpeg",
             originalFolder = item.relativePath,
         ) { out ->
-            if (lossless) {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            } else {
-                bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-            }
+            encoded.inputStream().use { it.copyTo(out) }
+            true
         }
     } finally {
-        bitmap.recycle()
+        encoded.delete()
     }
 }
 
@@ -262,8 +325,7 @@ data class VideoEdit(
  * video's uri, or null if it couldn't be saved.
  */
 suspend fun saveEditedVideo(context: Context, item: MediaItem, edit: VideoEdit, onProgress: (Float) -> Unit): Uri? {
-    val folder = File(context.cacheDir, "edits").apply { mkdirs() }
-    val output = File(folder, "export-${System.nanoTime()}.mp4")
+    val output = File(editsFolder(context), "export-${System.nanoTime()}.mp4")
     try {
         val source = withContext(Dispatchers.IO) { readVideoInfo(context, item.uri) }
         val exported = withContext(Dispatchers.Main) { export(context, item, edit, source, output, onProgress) }
@@ -607,6 +669,10 @@ private val KEPT_EXIF_TAGS = listOf(
     ExifInterface.TAG_GPS_PROCESSING_METHOD,
 )
 private const val MIN_BITRATE = 2_000_000
+private const val EDITS_FOLDER = "edits"
+
+/** Free space to leave on the phone beyond the new photo itself when saving over the original. */
+private const val SPACE_MARGIN_BYTES = 20L * 1024 * 1024
 private const val PROGRESS_POLL_MILLIS = 200L
 
 /** Longest side of the frames auto fit looks at. */

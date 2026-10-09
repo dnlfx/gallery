@@ -65,8 +65,9 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
   zoom photos, swipe a photo down to close, Media3 video playback. The top bar has a favorite
   button and a trash button (Android 11+), which moves the item to the system trash after the
   system's own confirmation, recoverable for 30 days. Its menu has Edit, which opens the built-in editor
-  (there's no handing items to other apps' editors), and details (dates, folder, resolution,
-  size).
+  (there's no handing items to other apps' editors), details (dates, folder, resolution,
+  size), and Rotate screen. Ultra HDR photos, which Pixel cameras save, show with their full
+  brightness on Android 14 and later, as in Photos.
 - `ui/editor/` The built-in editor, opened with Edit in the viewer's menu: crop for photos, crop
   and trim for videos (see below).
 
@@ -94,7 +95,10 @@ change at a time, Reset goes back to the start, and holding the compare button s
   and later). It's rendered from the original at full resolution and saved at the best quality
   the format allows: PNG and WebP losslessly, JPEG at quality 100. A crop alone is cut pixel for
   pixel. The date taken, camera details and location carry over. Formats the phone can't write
-  back (HEIC, AVIF, RAW), files other apps handed over, and Android 10 get a new copy instead.
+  back (HEIC, AVIF, RAW), files other apps handed over, and Android 10 get a new copy instead,
+  which keeps the same details. The original is copied aside first and put back if the save
+  fails partway, and a phone too full to hold both stops before anything changes. A photo save
+  can't be stopped once it has started, so it's never left half applied.
 - An edited video is always saved as a new copy next to the original, and the viewer moves to it.
   Copies go in Pictures/Gallery or Movies/Gallery where the original's folder can't take them.
 - Crop: a box starts around the whole photo or video. Drag a corner or edge to resize it, or drag
@@ -117,8 +121,10 @@ change at a time, Reset goes back to the start, and holding the compare button s
 ## Privacy
 
 Nothing leaves the phone. The app has no network permission (the manifest strips it even if a
-library asks for it, and CI fails if it ever appears), no analytics or tracking libraries, and
-backups are turned off.
+library asks for it, and CI fails if it ever appears, or if any permission other than photos and
+videos does), no analytics or tracking libraries, and neither cloud backup nor moving to a new
+phone copies anything the app keeps. Release builds write nothing to the system log. Other apps
+can only hand it content links, never file paths.
 
 ## Video controls
 
@@ -140,5 +146,5 @@ backups are turned off.
 - Loop button in the bottom bar: when it's on, every video plays again from the start when it
   finishes. The choice is saved, so it stays on until you turn it off.
 - With controls hidden, progress is a 2dp line along the bottom edge.
-- The rotate button in the top bar flips between portrait and landscape; otherwise the
+- Rotate screen in the top bar's menu flips between portrait and landscape; otherwise the
   viewer follows the phone's auto-rotate setting.
