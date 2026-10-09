@@ -205,6 +205,10 @@ fun ViewerScreen(
     }
 
     val activity = remember { context.findActivity() }
+    // A brightness slide on a video lasts only while the viewer is open.
+    DisposableEffect(activity) {
+        onDispose { activity?.window?.resetBrightness() }
+    }
     val originalOrientation = remember { activity?.requestedOrientation }
     DisposableEffect(activity) {
         onDispose { originalOrientation?.let { activity?.requestedOrientation = it } }
@@ -249,6 +253,8 @@ fun ViewerScreen(
                         onTogglePlay = { togglePlayback(player) },
                         onInteraction = { interactions++ },
                         onZoomedChange = { videoZoomed = it },
+                        onDismissProgress = { dismissProgress = it },
+                        onDismiss = onClose,
                     )
                 } else {
                     VideoPoster(item)
@@ -318,7 +324,7 @@ fun ViewerScreen(
 
         if (video != null && player != null && scrubber != null) {
             AnimatedVisibility(
-                visible = controlsVisible,
+                visible = controlsVisible && !dismissing,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.Center),
@@ -332,7 +338,7 @@ fun ViewerScreen(
                 )
             }
             AnimatedVisibility(
-                visible = controlsVisible,
+                visible = controlsVisible && !dismissing,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -365,7 +371,7 @@ fun ViewerScreen(
                     ),
                 )
             }
-            if (!controlsVisible) {
+            if (!controlsVisible && !dismissing) {
                 HairlineProgress(playback, Modifier.align(Alignment.BottomCenter))
             }
         }

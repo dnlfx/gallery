@@ -123,11 +123,21 @@ fun scrubSeekPosition(positionMillis: Long, durationMillis: Long): Long =
 fun seekLanded(framePositionUs: Long, targetUs: Long): Boolean =
     framePositionUs >= targetUs - SEEK_LANDED_BEFORE_US && framePositionUs <= targetUs + SEEK_LANDED_AFTER_US
 
+/** What an up or down slide on the video does, by the third of the screen it starts in. */
+enum class VerticalSlide { BRIGHTNESS, CLOSE, VOLUME }
+
+/** Left third: brightness. Middle: pull down to close, like a photo. Right third: volume. */
+fun verticalSlide(zone: TapZone): VerticalSlide = when (zone) {
+    TapZone.BACK -> VerticalSlide.BRIGHTNESS
+    TapZone.CENTER -> VerticalSlide.CLOSE
+    TapZone.FORWARD -> VerticalSlide.VOLUME
+}
+
 /**
- * New volume as a 0..1 fraction after an upward slide of [dragUp] pixels; sliding the full
- * [height] of the screen goes from silent to full.
+ * New volume or brightness as a 0..1 fraction after an upward slide of [dragUp] pixels; sliding
+ * the full [height] of the screen goes from lowest to highest.
  */
-fun volumeAfterDrag(startFraction: Float, dragUp: Float, height: Float): Float {
+fun levelAfterDrag(startFraction: Float, dragUp: Float, height: Float): Float {
     if (height <= 0f) return startFraction.coerceIn(0f, 1f)
     return (startFraction + dragUp / height).coerceIn(0f, 1f)
 }

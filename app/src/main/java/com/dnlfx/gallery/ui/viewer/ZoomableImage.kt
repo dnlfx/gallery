@@ -64,10 +64,10 @@ private const val MAX_DECODE_PX = 4096
 private const val TILE_SETTLE_MILLIS = 120L
 
 /** Pulled down this fraction of the screen, or flung faster than this, the viewer closes on release. */
-private const val DISMISS_DISTANCE = 0.15f
-private const val DISMISS_FLING_DP_PER_SECOND = 1_000
-private const val DISMISS_SHRINK = 0.3f
-private const val DISMISS_MILLIS = 150
+internal const val DISMISS_DISTANCE = 0.15f
+internal const val DISMISS_FLING_DP_PER_SECOND = 1_000
+internal const val DISMISS_SHRINK = 0.3f
+internal const val DISMISS_MILLIS = 150
 
 /**
  * A photo that fits the screen and can be pinch-zoomed, panned and double-tapped. At normal size

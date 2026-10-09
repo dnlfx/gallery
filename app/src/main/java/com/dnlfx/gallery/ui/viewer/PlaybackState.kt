@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,12 @@ class PlaybackState {
     /** Width over height of the video frame, or 0 until the first frame size is known. */
     var aspectRatio by mutableFloatStateOf(0f)
         internal set
+
+    /** The video's own size in pixels, or 0 by 0 until it's known. */
+    var frameWidth by mutableIntStateOf(0)
+        internal set
+    var frameHeight by mutableIntStateOf(0)
+        internal set
     var firstFrameRendered by mutableStateOf(false)
         internal set
 
@@ -52,6 +59,8 @@ class PlaybackState {
     internal fun resetForNewItem() {
         firstFrameRendered = false
         aspectRatio = 0f
+        frameWidth = 0
+        frameHeight = 0
         playerPositionMillis = 0L
         scrubTargetMillis = null
         durationMillis = 0L
@@ -80,6 +89,8 @@ fun rememberPlaybackState(player: Player?): PlaybackState {
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                state.frameWidth = videoSize.width.coerceAtLeast(0)
+                state.frameHeight = videoSize.height.coerceAtLeast(0)
                 state.aspectRatio = if (videoSize.width > 0 && videoSize.height > 0) {
                     videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
                 } else {

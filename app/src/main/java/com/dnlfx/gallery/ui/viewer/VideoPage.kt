@@ -4,7 +4,11 @@ import android.content.Context
 import android.media.AudioManager
 import android.view.HapticFeedbackConstants
 import android.view.SurfaceView
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -38,6 +42,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +55,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -72,6 +79,7 @@ import coil3.compose.AsyncImage
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.thumbnail.viewerThumbnailRequest
+import com.dnlfx.gallery.ui.findActivity
 import com.dnlfx.gallery.ui.grid.formatDuration
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -99,7 +107,8 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
  *   and keep tapping that side to add 10 more each time; double-tap the middle to play or pause;
  * - swipe sideways to move to the previous or next item, like on a photo;
  * - press and hold for a moment, then slide sideways, to scrub through the video;
- * - slide up or down to change the volume;
+ * - slide up or down on the left third to change the brightness, or on the right third to change
+ *   the volume; pull down in the middle to close the video, like a photo;
  * - pinch to zoom; while zoomed in, one finger moves the picture instead of scrubbing.
  *
  * Screen readers get the same skips and volume changes as actions on the video.
@@ -115,6 +124,8 @@ fun VideoPage(
     onTogglePlay: () -> Unit,
     onInteraction: () -> Unit,
     onZoomedChange: (Boolean) -> Unit,
+    onDismissProgress: (Float) -> Unit,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -130,6 +141,15 @@ fun VideoPage(
     var scrub by remember { mutableStateOf<ScrubFeedback?>(null) }
     var volume by remember { mutableStateOf<Float?>(null) }
     var volumeToken by remember { mutableIntStateOf(0) }
+    val window = remember { context.findActivity()?.window }
+    var brightness by remember { mutableStateOf<Float?>(null) }
+    var brightnessToken by remember { mutableIntStateOf(0) }
+    // How far a pull down in the middle has moved the video towards closing.
+    var dismissOffset by remember(item.id) { mutableFloatStateOf(0f) }
+    var pageHeight by remember { mutableIntStateOf(0) }
+    fun dismissProgress() = (dismissOffset / pageHeight.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val dismissProgressChanged by rememberUpdatedState(onDismissProgress)
+    val dismissed by rememberUpdatedState(onDismiss)
     var playFeedback by remember { mutableStateOf<Boolean?>(null) }
     var playToken by remember { mutableIntStateOf(0) }
     var zoom by remember(item.id) { mutableStateOf(VideoZoom()) }
@@ -151,20 +171,36 @@ fun VideoPage(
         delay(FEEDBACK_MILLIS)
         volume = null
     }
+    LaunchedEffect(brightnessToken) {
+        delay(FEEDBACK_MILLIS)
+        brightness = null
+    }
     LaunchedEffect(playToken) {
         delay(FEEDBACK_MILLIS)
         playFeedback = null
     }
 
-    Box(modifier.fillMaxSize().background(Color.Black)) {
+    // The viewer behind draws the black backdrop, which fades out as the video is pulled down.
+    Box(modifier.fillMaxSize().onSizeChanged { pageHeight = it.height }) {
         AndroidView(
             factory = { ctx -> SurfaceView(ctx).also(player::setVideoSurfaceView) },
-            // A SurfaceView follows its view's scale and position, so zooming costs nothing extra.
+            // A SurfaceView follows its view's scale and position, so zooming and pulling down to
+            // close cost nothing extra. It shrinks a little as it's pulled, like a photo.
             update = {
-                it.scaleX = zoom.scale
-                it.scaleY = zoom.scale
+                // The surface keeps the video's own size and the screen scales it to fit the view.
+                // Sized to the view instead, a resize (a new video's shape, the bars coming and
+                // going) left the last frame drawn at the old size, squeezed into part of the
+                // view, until the next frame arrived, which for a paused video is never.
+                if (playback.frameWidth > 0 && playback.frameHeight > 0) {
+                    it.holder.setFixedSize(playback.frameWidth, playback.frameHeight)
+                } else {
+                    it.holder.setSizeFromLayout()
+                }
+                val shrink = 1f - DISMISS_SHRINK * dismissProgress()
+                it.scaleX = zoom.scale * shrink
+                it.scaleY = zoom.scale * shrink
                 it.translationX = zoom.x
-                it.translationY = zoom.y
+                it.translationY = zoom.y + dismissOffset
             },
             onRelease = { player.clearVideoSurfaceView(it) },
             modifier = Modifier
@@ -179,7 +215,17 @@ fun VideoPage(
                 ),
         )
         // The surface stays black until the first frame, so cover it with the thumbnail until then.
-        if (!playback.firstFrameRendered) VideoPoster(item)
+        if (!playback.firstFrameRendered) {
+            VideoPoster(
+                item,
+                Modifier.graphicsLayer {
+                    val shrink = 1f - DISMISS_SHRINK * dismissProgress()
+                    scaleX = shrink
+                    scaleY = shrink
+                    translationY = dismissOffset
+                },
+            )
+        }
 
         val skipBackLabel = stringResource(R.string.viewer_a11y_skip_back)
         val skipForwardLabel = stringResource(R.string.viewer_a11y_skip_forward)
@@ -241,6 +287,7 @@ fun VideoPage(
                         val velocity = VelocityTracker()
                         val maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
                         val startVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC) / maxVolume.toFloat()
+                        var startBrightness = 0f
                         var released = false
                         var upMillis = 0L
                         var lastMillis = down.uptimeMillis
@@ -287,9 +334,14 @@ fun VideoPage(
                                         zoom.zoomed -> DragMode.PAN
                                         // A swipe straight away is for the pager: leave it unconsumed.
                                         abs(total.x) > abs(total.y) -> DragMode.SWIPE
-                                        else -> DragMode.VOLUME
+                                        else -> when (verticalSlide(tapZone(down.position.x, size.width.toFloat()))) {
+                                            VerticalSlide.BRIGHTNESS -> DragMode.BRIGHTNESS
+                                            VerticalSlide.CLOSE -> DragMode.DISMISS
+                                            VerticalSlide.VOLUME -> DragMode.VOLUME
+                                        }
                                     }
-                                    if (mode != DragMode.SWIPE) interacted()
+                                    if (mode == DragMode.BRIGHTNESS) startBrightness = window?.currentBrightness() ?: 0f
+                                    if (mode != DragMode.SWIPE && mode != DragMode.DISMISS) interacted()
                                 }
                                 when (mode) {
                                     DragMode.SCRUB -> {
@@ -311,7 +363,7 @@ fun VideoPage(
                                     }
                                     DragMode.VOLUME -> {
                                         if (!audio.isVolumeFixed) {
-                                            val fraction = volumeAfterDrag(startVolume, -total.y, size.height.toFloat())
+                                            val fraction = levelAfterDrag(startVolume, -total.y, size.height.toFloat())
                                             audio.setStreamVolume(
                                                 AudioManager.STREAM_MUSIC,
                                                 (fraction * maxVolume).roundToInt(),
@@ -320,6 +372,18 @@ fun VideoPage(
                                             volume = fraction
                                             volumeToken++
                                         }
+                                    }
+                                    DragMode.BRIGHTNESS -> {
+                                        if (window != null) {
+                                            val fraction = levelAfterDrag(startBrightness, -total.y, size.height.toFloat())
+                                            window.setBrightness(fraction)
+                                            brightness = fraction
+                                            brightnessToken++
+                                        }
+                                    }
+                                    DragMode.DISMISS -> {
+                                        dismissOffset = (dismissOffset + change.positionChange().y).coerceAtLeast(0f)
+                                        dismissProgressChanged(dismissProgress())
                                     }
                                     DragMode.ZOOM -> {
                                         val centroid = event.calculateCentroid(useCurrent = true)
@@ -352,6 +416,23 @@ fun VideoPage(
                                 scrub = null
                             }
                             if (mode == DragMode.ZOOM) zoom = zoom.settled()
+                        }
+
+                        if (mode == DragMode.DISMISS) {
+                            // Pulled far enough or flung down: close. Otherwise spring back into place.
+                            val flung = velocity.calculateVelocity().y > DISMISS_FLING_DP_PER_SECOND.dp.toPx()
+                            val close = released && (flung || dismissProgress() > DISMISS_DISTANCE)
+                            scope.launch {
+                                animate(
+                                    initialValue = dismissOffset,
+                                    targetValue = if (close) size.height.toFloat() else 0f,
+                                    animationSpec = if (close) tween(DISMISS_MILLIS) else spring(),
+                                ) { value, _ ->
+                                    dismissOffset = value
+                                    dismissProgressChanged(dismissProgress())
+                                }
+                                if (close) dismissed()
+                            }
                         }
 
                         if (mode != DragMode.NONE || multiTouch) {
@@ -429,7 +510,18 @@ fun VideoPage(
                 )
             }
         }
-        VolumeReadout(volume = { volume }, modifier = Modifier.align(Alignment.Center))
+        LevelReadout(
+            level = { volume },
+            icon = { if (it <= 0f) ViewerIcons.VolumeOff else ViewerIcons.VolumeUp },
+            description = R.string.viewer_volume,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        LevelReadout(
+            level = { brightness },
+            icon = { ViewerIcons.Brightness },
+            description = R.string.viewer_brightness,
+            modifier = Modifier.align(Alignment.Center),
+        )
     }
 }
 
@@ -454,15 +546,20 @@ private fun ScrubReadout(feedback: () -> ScrubFeedback?, modifier: Modifier = Mo
 }
 
 @Composable
-private fun VolumeReadout(volume: () -> Float?, modifier: Modifier = Modifier) {
-    val current = volume()
+private fun LevelReadout(
+    level: () -> Float?,
+    icon: (Float) -> ImageVector,
+    @StringRes description: Int,
+    modifier: Modifier = Modifier,
+) {
+    val current = level()
     AnimatedVisibility(
         visible = current != null,
         enter = fadeIn(),
         exit = fadeOut(),
         modifier = modifier,
     ) {
-        VolumeIndicator(current ?: 0f)
+        LevelIndicator(current ?: 0f, icon, description)
     }
 }
 
@@ -490,15 +587,15 @@ private fun SkipBubble(feedback: SkipFeedback, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun VolumeIndicator(fraction: Float) {
+private fun LevelIndicator(fraction: Float, icon: (Float) -> ImageVector, @StringRes description: Int) {
     Pill {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Icon(
-                imageVector = if (fraction <= 0f) ViewerIcons.VolumeOff else ViewerIcons.VolumeUp,
-                contentDescription = stringResource(R.string.viewer_volume),
+                imageVector = icon(fraction),
+                contentDescription = stringResource(description),
                 tint = Color.White,
             )
             Box(
@@ -532,7 +629,7 @@ private fun Pill(modifier: Modifier = Modifier, content: @Composable () -> Unit)
     }
 }
 
-private enum class DragMode { NONE, SCRUB, VOLUME, ZOOM, PAN, SWIPE }
+private enum class DragMode { NONE, SCRUB, VOLUME, BRIGHTNESS, DISMISS, ZOOM, PAN, SWIPE }
 
 private fun IntSize.toZoomSize() = VideoZoom.Size(width.toFloat(), height.toFloat())
 
