@@ -94,6 +94,9 @@ jobs:
               "android.permission.READ_MEDIA_VIDEO",
               "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
               "android.permission.READ_EXTERNAL_STORAGE",
+              # Declared by a library (it was already in releases before this check). It only
+              # keeps the CPU awake; it reaches no data and nothing outside the phone.
+              "android.permission.WAKE_LOCK",
               # AndroidX's own guard for receivers registered in code; signature-only.
               "com.dnlfx.gallery.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
           }
