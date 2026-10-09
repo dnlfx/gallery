@@ -5,14 +5,17 @@ import android.net.Uri
 import android.os.CancellationSignal
 import android.util.Size as AndroidSize
 import coil3.ImageLoader
+import coil3.PlatformContext
 import coil3.asImage
 import coil3.decode.DataSource
 import coil3.fetch.FetchResult
 import coil3.fetch.Fetcher
 import coil3.fetch.ImageFetchResult
 import coil3.key.Keyer
+import coil3.request.ImageRequest
 import coil3.request.Options
 import coil3.size.pxOrElse
+import com.dnlfx.gallery.data.MediaItem
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
@@ -21,7 +24,25 @@ import kotlinx.coroutines.launch
 /**
  * Grid thumbnail request. [version] (the item's modified time) busts the cache when a file changes.
  */
-data class MediaThumbnail(val uri: Uri, val version: Long)
+data class MediaThumbnail(val uri: Uri, val version: Long) {
+    /**
+     * Where the thumbnail sits in the memory cache. The viewer passes it as a placeholder key, so
+     * a photo opened from the grid shows the thumbnail already in memory straight away.
+     */
+    val memoryCacheKey: String get() = "$uri#$version"
+}
+
+/**
+ * A thumbnail request for the viewer, at whatever size the viewer lays it out, that shows the
+ * grid's smaller copy straight from memory while the sharper one loads.
+ */
+fun viewerThumbnailRequest(context: PlatformContext, item: MediaItem): ImageRequest {
+    val thumbnail = MediaThumbnail(item.uri, item.dateModifiedSeconds)
+    return ImageRequest.Builder(context)
+        .data(thumbnail)
+        .placeholderMemoryCacheKey(thumbnail.memoryCacheKey)
+        .build()
+}
 
 /**
  * Loads thumbnails through the system's MediaStore thumbnail cache, which uses the platform
@@ -71,5 +92,5 @@ class MediaThumbnailFetcher(
 }
 
 class MediaThumbnailKeyer : Keyer<MediaThumbnail> {
-    override fun key(data: MediaThumbnail, options: Options): String = "${data.uri}#${data.version}"
+    override fun key(data: MediaThumbnail, options: Options): String = data.memoryCacheKey
 }

@@ -109,10 +109,11 @@ fun VideoBottomBar(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TimeLabel(formatDuration(playback.positionMillis))
+            // The position changes many times a second while playing, so only the parts that
+            // show it read it, not the whole bar.
+            PositionLabel(playback)
             ThinSeekBar(
-                positionMillis = playback.positionMillis,
-                durationMillis = playback.durationMillis,
+                playback = playback,
                 onSeek = onSeek,
                 onSeekStart = onSeekStart,
                 onSeekEnd = onSeekEnd,
@@ -151,8 +152,9 @@ fun VideoBottomBar(
 /** While controls are hidden: a 2dp line along the bottom edge, the only thing over the video. */
 @Composable
 fun HairlineProgress(playback: PlaybackState, modifier: Modifier = Modifier) {
-    val fraction = progressFraction(playback.positionMillis, playback.durationMillis)
     Canvas(modifier.fillMaxWidth().height(2.dp)) {
+        // Read while drawing, so progress only redraws the line.
+        val fraction = progressFraction(playback.positionMillis, playback.durationMillis)
         drawRect(Color.White.copy(alpha = 0.2f))
         drawRect(Color.White.copy(alpha = 0.7f), size = size.copy(width = size.width * fraction))
     }
@@ -187,6 +189,11 @@ private fun SpeedPicker(selected: Float, onSelect: (Float) -> Unit) {
 }
 
 @Composable
+private fun PositionLabel(playback: PlaybackState) {
+    TimeLabel(formatDuration(playback.positionMillis))
+}
+
+@Composable
 private fun TimeLabel(text: String) {
     Text(text = text, style = MaterialTheme.typography.labelMedium, color = Color.White)
 }
@@ -194,13 +201,14 @@ private fun TimeLabel(text: String) {
 /** A 3dp track with a small thumb; tap or drag anywhere along it to seek. */
 @Composable
 private fun ThinSeekBar(
-    positionMillis: Long,
-    durationMillis: Long,
+    playback: PlaybackState,
     onSeek: (Long) -> Unit,
     onSeekStart: () -> Unit,
     onSeekEnd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val positionMillis = playback.positionMillis
+    val durationMillis = playback.durationMillis
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     val duration by rememberUpdatedState(durationMillis)
     val seek by rememberUpdatedState(onSeek)

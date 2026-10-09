@@ -61,6 +61,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -114,6 +115,11 @@ fun MediaGridScreen(
     gridState: LazyGridState = rememberLazyGridState(),
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    // The overlap changes on every frame of a scroll; only crossing the threshold matters, so the
+    // bar recomposes once when the grid slides under it rather than on every frame.
+    val scrolledUnder by remember(scrollBehavior) {
+        derivedStateOf { scrollBehavior.state.overlappedFraction > 0.01f }
+    }
     val resources = LocalContext.current.resources
     val scope = rememberCoroutineScope()
     val requests = rememberMediaRequests()
@@ -139,7 +145,7 @@ fun MediaGridScreen(
             // The chips sit under the app bar and share its colour, which deepens once the grid
             // scrolls beneath it.
             val barColor by animateColorAsState(
-                targetValue = if (scrollBehavior.state.overlappedFraction > 0.01f) {
+                targetValue = if (scrolledUnder) {
                     MaterialTheme.colorScheme.surfaceContainer
                 } else {
                     MaterialTheme.colorScheme.surface
@@ -489,7 +495,6 @@ internal fun MediaCell(
     label: String? = null,
 ) {
     val context = LocalContext.current
-    val description = remember(item) { mediaDescription(context, item) }
     val request = remember(item.uri, item.dateModifiedSeconds) {
         ImageRequest.Builder(context)
             .data(MediaThumbnail(item.uri, item.dateModifiedSeconds))
@@ -513,8 +518,10 @@ internal fun MediaCell(
                     Modifier.clickable(onClick = onClick)
                 },
             )
+            // The description is worked out only when something reads it, such as TalkBack, not
+            // for every cell a fling passes.
             .semantics {
-                contentDescription = description
+                contentDescription = mediaDescription(context, item)
                 // Holding a cell starts a selection; TalkBack offers the same as an action.
                 if (!selecting && onSelect != null) {
                     onLongClick(label = selectLabel) {

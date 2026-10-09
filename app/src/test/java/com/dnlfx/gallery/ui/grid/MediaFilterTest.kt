@@ -74,4 +74,25 @@ class MediaFilterTest {
             availableFilters(emptyList(), MediaFilter.DOWNLOADS),
         )
     }
+
+    @Test
+    fun foldersMatchWhateverTheirCase() {
+        assertTrue(MediaFilter.CAMERA.photo("dcim/camera/"))
+        assertTrue(MediaFilter.SCREENSHOTS.photo("pictures/SCREENSHOTS"))
+        assertTrue(MediaFilter.DOWNLOADS.video("DOWNLOAD/"))
+        assertTrue(MediaFilter.SCREEN_RECORDINGS.video("MOVIES/", "SCREEN-1.mp4"))
+        assertFalse(MediaFilter.SCREENSHOTS.photo("Pictures/Screenshot/"))
+    }
+
+    @Test
+    fun chipsKeepTheirOrderAndTheSelectedFilter() {
+        assertEquals(
+            listOf(MediaFilter.ALL, MediaFilter.PHOTOS, MediaFilter.DOWNLOADS),
+            chipFilters(setOf(MediaFilter.DOWNLOADS, MediaFilter.PHOTOS), MediaFilter.ALL),
+        )
+        assertEquals(
+            listOf(MediaFilter.ALL, MediaFilter.VIDEOS, MediaFilter.FAVORITES),
+            chipFilters(setOf(MediaFilter.VIDEOS), MediaFilter.FAVORITES),
+        )
+    }
 }

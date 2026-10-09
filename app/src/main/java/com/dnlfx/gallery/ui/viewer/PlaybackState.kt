@@ -10,11 +10,13 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 /** Snapshot of the player that Compose can observe. */
 @Stable
@@ -66,10 +68,12 @@ class PlaybackState {
     }
 }
 
+/** Follows [player], or stays idle while there's no player yet. */
 @Composable
-fun rememberPlaybackState(player: Player): PlaybackState {
+fun rememberPlaybackState(player: Player?): PlaybackState {
     val state = remember(player) { PlaybackState() }
     DisposableEffect(player) {
+        if (player == null) return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 state.sync(player)
@@ -95,12 +99,19 @@ fun rememberPlaybackState(player: Player): PlaybackState {
         state.sync(player)
         onDispose { player.removeListener(listener) }
     }
-    // The player doesn't report position ticks, so poll while something is loaded.
+    // The player doesn't report position ticks, so poll while it plays. Everything else (a seek,
+    // a pause, the end) arrives as an event, so a photo, a paused video or the app in the
+    // background wakes nothing up.
     LaunchedEffect(player) {
-        while (true) {
-            state.sync(player)
-            delay(if (state.isPlaying) 100L else 250L)
+        if (player == null) return@LaunchedEffect
+        snapshotFlow { state.isPlaying }.collectLatest { playing ->
+            while (playing) {
+                state.sync(player)
+                delay(POSITION_POLL_MILLIS)
+            }
         }
     }
     return state
 }
+
+private const val POSITION_POLL_MILLIS = 100L
