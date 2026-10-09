@@ -56,11 +56,17 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
 - `ui/permission/` Photos and videos permission, including Android 14's "selected photos" mode.
 - `ui/grid/` The all-media grid, grouped under month headers, with a fast-scroll thumb on the right
   edge for big libraries. Pinch to switch between about 3, 4, 6 and 8 columns; the choice is kept.
+  Press and hold an item to select it, then keep holding and slide to select a run of items (the
+  grid scrolls when you reach the top or bottom); tap to add or remove more. Selected items can be
+  starred or moved to the trash together (Android 11+). The menu in the top bar opens the trash,
+  where items can be restored or deleted for good before the system clears them after 30 days.
 
 - `ui/viewer/` Full-screen viewer: swipe between items in grid order, pinch or double-tap to
-  zoom photos, swipe a photo down to close, Media3 video playback. The top bar has details (dates,
-  folder, resolution, size) and a trash button (Android 11+), which moves the item to the system
-  trash after the system's own confirmation, recoverable for 30 days.
+  zoom photos, swipe a photo down to close, Media3 video playback. The top bar has a favorite
+  button and a trash button (Android 11+), which moves the item to the system trash after the
+  system's own confirmation, recoverable for 30 days. Its menu has Edit in…, which hands the item
+  to an editor such as Photos or Snapseed (edits come back as a new copy), and details (dates,
+  folder, resolution, size).
 
 Other apps (Files, Messages, the camera) can open a photo or video in Gallery. One that's in the
 library opens among its neighbours; anything else opens on its own, without needing the photos
@@ -99,6 +105,8 @@ backups are turned off.
   start and end.
 - Slide up or down to change the volume.
 - Speed button in the bottom bar: 0.25x to 3x. The speed stays set for the next video.
+- Loop button in the bottom bar: when it's on, every video plays again from the start when it
+  finishes. The choice is saved, so it stays on until you turn it off.
 - With controls hidden, progress is a 2dp line along the bottom edge.
 - The rotate button in the top bar flips between portrait and landscape; otherwise the
   viewer follows the phone's auto-rotate setting.

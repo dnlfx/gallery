@@ -38,6 +38,7 @@ import com.dnlfx.gallery.data.mediaStoreId
 import com.dnlfx.gallery.ui.grid.GridState
 import com.dnlfx.gallery.ui.grid.GridViewModel
 import com.dnlfx.gallery.ui.grid.MediaGridScreen
+import com.dnlfx.gallery.ui.grid.TrashScreen
 import com.dnlfx.gallery.ui.permission.MediaAccess
 import com.dnlfx.gallery.ui.permission.MediaPermissions
 import com.dnlfx.gallery.ui.permission.PermissionScreen
@@ -88,6 +89,7 @@ fun GalleryApp(
     // Survives the trip into the viewer so the grid comes back where it was.
     val gridState = rememberLazyGridState()
     var viewerItemId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var trashOpen by rememberSaveable { mutableStateOf(false) }
 
     if (access == MediaAccess.NONE) {
         PermissionScreen(
@@ -103,6 +105,7 @@ fun GalleryApp(
     val limitedAccess = access == MediaAccess.PARTIAL
     val openItemId = viewerItemId
     val viewerOpen = openItemId != null && items != null
+    val coveredByTrash = trashOpen && canChangeMedia
     // The same instance every time, so swiping in the viewer doesn't recompose the grid beneath.
     val hiddenFromScreenReaders = remember { Modifier.clearAndSetSemantics {} }
     Box(Modifier.fillMaxSize()) {
@@ -114,9 +117,14 @@ fun GalleryApp(
             onItemClick = { _, item -> viewerItemId = item.id },
             onFilterSelected = viewModel::onFilterSelected,
             onSortSelected = viewModel::onSortSelected,
+            onOpenTrash = if (canChangeMedia) { { trashOpen = true } } else null,
             gridState = gridState,
-            modifier = if (viewerOpen) hiddenFromScreenReaders else Modifier,
+            modifier = if (viewerOpen || coveredByTrash) hiddenFromScreenReaders else Modifier,
         )
+        if (coveredByTrash) {
+            val trash by viewModel.trash.collectAsStateWithLifecycle()
+            TrashScreen(items = trash, onClose = { trashOpen = false })
+        }
         if (openItemId != null && items != null) {
             ViewerScreen(
                 items = items,

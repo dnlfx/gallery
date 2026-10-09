@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,8 +72,8 @@ fun PlayPauseButton(playing: Boolean, onClick: () -> Unit, modifier: Modifier = 
 }
 
 /**
- * The bottom strip while controls are shown: current time, a thin seek bar, the length and the
- * speed button. It sits on a faint gradient so most of the frame stays visible. Swipes move between
+ * The bottom strip while controls are shown: current time, a thin seek bar, the length, the loop
+ * toggle and the speed button. It sits on a faint gradient so most of the frame stays visible. Swipes move between
  * items, so there are no arrows.
  */
 @Composable
@@ -80,6 +81,8 @@ fun VideoBottomBar(
     playback: PlaybackState,
     speed: Float,
     onSpeedChange: (Float) -> Unit,
+    loop: Boolean,
+    onLoopChange: (Boolean) -> Unit,
     onSeek: (Long) -> Unit,
     onSeekStart: () -> Unit,
     onSeekEnd: () -> Unit,
@@ -117,6 +120,19 @@ fun VideoBottomBar(
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
             TimeLabel(formatDuration(playback.durationMillis))
+            IconToggleButton(
+                checked = loop,
+                onCheckedChange = {
+                    onLoopChange(it)
+                    onInteraction()
+                },
+            ) {
+                Icon(
+                    ViewerIcons.Repeat,
+                    contentDescription = stringResource(R.string.viewer_loop),
+                    tint = if (loop) Color.White else Color.White.copy(alpha = 0.5f),
+                )
+            }
             TextButton(
                 onClick = {
                     speedPickerOpen = !speedPickerOpen

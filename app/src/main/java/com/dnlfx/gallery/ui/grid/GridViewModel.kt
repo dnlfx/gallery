@@ -83,6 +83,12 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GridState.Loading)
 
+    /** What's in the system trash, or null until it's been read. Only read while someone watches. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val trash: StateFlow<List<MediaItem>?> = access
+        .flatMapLatest { level -> if (level == MediaAccess.NONE) flowOf(emptyList()) else repository.observeTrash() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     fun onAccessChanged(level: MediaAccess) {
         access.value = level
     }
