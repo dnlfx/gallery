@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.ColorSpace
+import android.graphics.Gainmap
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
@@ -15,6 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.media3.common.Effect
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Size
@@ -300,12 +302,50 @@ private fun render(width: Int, height: Int, edit: PhotoEdit, decode: (CropPixels
     val matrix = Affine.translate(region.left.toFloat(), region.top.toFloat())
         .then(toFrame)
         .then(Affine.translate(-output.left.toFloat(), -output.top.toFloat()))
+    val toResult = Matrix().apply { setValues(matrix.toMatrixValues()) }
     val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
         if (!edit.adjustments.isNeutral) colorFilter = ColorMatrixColorFilter(edit.adjustments.colorMatrix())
     }
-    Canvas(result).drawBitmap(part, Matrix().apply { setValues(matrix.toMatrixValues()) }, paint)
+    Canvas(result).drawBitmap(part, toResult, paint)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) carryGainmap(part, result, toResult)
     part.recycle()
     return result
+}
+
+/**
+ * Gives [result] the HDR gain map of [part] (an Ultra HDR photo has one), drawn the same way
+ * [toResult] drew the picture, so an edited HDR photo stays HDR. The gain map is usually smaller
+ * than the picture, so the drawing is scaled to its size. Adjustments leave the gain map alone.
+ */
+@RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+private fun carryGainmap(part: Bitmap, result: Bitmap, toResult: Matrix) {
+    val gainmap = part.gainmap ?: return
+    val contents = gainmap.gainmapContents
+    val scaleX = contents.width.toFloat() / part.width
+    val scaleY = contents.height.toFloat() / part.height
+    val drawn = Bitmap.createBitmap(
+        (result.width * scaleX).roundToInt().coerceAtLeast(1),
+        (result.height * scaleY).roundToInt().coerceAtLeast(1),
+        contents.config ?: Bitmap.Config.ARGB_8888,
+    )
+    val toDrawn = Matrix(toResult).apply {
+        preScale(1 / scaleX, 1 / scaleY)
+        postScale(drawn.width.toFloat() / result.width, drawn.height.toFloat() / result.height)
+    }
+    Canvas(drawn).drawBitmap(contents, toDrawn, Paint(Paint.FILTER_BITMAP_FLAG))
+    result.gainmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+        Gainmap(gainmap, drawn)
+    } else {
+        Gainmap(drawn).apply {
+            gainmap.ratioMin.let { setRatioMin(it[0], it[1], it[2]) }
+            gainmap.ratioMax.let { setRatioMax(it[0], it[1], it[2]) }
+            gainmap.gamma.let { setGamma(it[0], it[1], it[2]) }
+            gainmap.epsilonSdr.let { setEpsilonSdr(it[0], it[1], it[2]) }
+            gainmap.epsilonHdr.let { setEpsilonHdr(it[0], it[1], it[2]) }
+            displayRatioForFullHdr = gainmap.displayRatioForFullHdr
+            minDisplayRatioForHdrTransition = gainmap.minDisplayRatioForHdrTransition
+        }
+    }
 }
 
 /** What to change in a video: the part to keep (null for all of it), the picture, and the sound. */
