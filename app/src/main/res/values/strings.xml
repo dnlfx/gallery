@@ -66,4 +66,28 @@
     <string name="viewer_frame_saved">Frame saved to Pictures/Gallery</string>
     <string name="viewer_frame_failed">Couldn\'t save this frame</string>
     <string name="viewer_video_error">This phone can\'t play this video</string>
+    <string name="viewer_more">More options</string>
+    <string name="viewer_edit_in">Edit in…</string>
+    <string name="viewer_edit_failed">Couldn\'t open an editor for this</string>
+    <string name="favorite_add">Add to favorites</string>
+    <string name="favorite_remove">Remove from favorites</string>
+    <string name="cell_select">Select</string>
+    <string name="selection_clear">Clear selection</string>
+    <plurals name="selected_count">
+        <item quantity="one">%1$s selected</item>
+        <item quantity="other">%1$s selected</item>
+    </plurals>
+    <string name="more_options">More options</string>
+    <string name="trash_title">Trash</string>
+    <string name="trash_back">Back to all photos</string>
+    <string name="trash_note">Items in the trash are deleted for good 30 days after they were moved there.</string>
+    <string name="trash_empty">The trash is empty</string>
+    <string name="trash_select_all">Select all</string>
+    <string name="trash_restore">Restore</string>
+    <string name="trash_delete_forever">Delete forever</string>
+    <string name="trash_last_day">Last day</string>
+    <plurals name="trash_days_left">
+        <item quantity="one">%1$d day left</item>
+        <item quantity="other">%1$d days left</item>
+    </plurals>
 </resources>

@@ -1,5 +1,8 @@
 package com.dnlfx.gallery.ui.viewer
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.widget.Toast
@@ -23,8 +26,14 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,7 +77,9 @@ import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.EXTERNAL_ITEM_ID
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
+import com.dnlfx.gallery.ui.canChangeMedia
 import com.dnlfx.gallery.ui.findActivity
+import com.dnlfx.gallery.ui.rememberMediaRequests
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -182,7 +193,7 @@ fun ViewerScreen(
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
     // 0 normally, rising towards 1 as a photo is pulled down to close the viewer.
     var dismissProgress by remember { mutableFloatStateOf(0f) }
-    val trash = rememberTrashRequest()
+    val requests = rememberMediaRequests()
     var interactions by remember { mutableIntStateOf(0) }
     var draggingSeekBar by remember { mutableStateOf(false) }
     var videoZoomed by remember { mutableStateOf(false) }
@@ -275,8 +286,15 @@ fun ViewerScreen(
                     } else {
                         null
                     },
-                    onTrash = if (canTrash && item.id != EXTERNAL_ITEM_ID) {
-                        { trash(item.uri) }
+                    onEdit = { editIn(context, item) },
+                    // Only library items can be starred or trashed, not files other apps handed over.
+                    onFavorite = if (canChangeMedia && item.id != EXTERNAL_ITEM_ID) {
+                        { requests.favorite(listOf(item.uri), !item.isFavorite) }
+                    } else {
+                        null
+                    },
+                    onTrash = if (canChangeMedia && item.id != EXTERNAL_ITEM_ID) {
+                        { requests.trash(listOf(item.uri)) }
                     } else {
                         null
                     },
@@ -368,6 +386,8 @@ private fun ViewerTopBar(
     onBack: () -> Unit,
     onInfo: () -> Unit,
     onSaveFrame: (() -> Unit)?,
+    onEdit: () -> Unit,
+    onFavorite: (() -> Unit)?,
     onTrash: (() -> Unit)?,
     onRotate: () -> Unit,
 ) {
@@ -418,12 +438,16 @@ private fun ViewerTopBar(
                 )
             }
         }
-        IconButton(onClick = onInfo) {
-            Icon(
-                Icons.Outlined.Info,
-                contentDescription = stringResource(R.string.viewer_info),
-                tint = Color.White,
-            )
+        if (onFavorite != null) {
+            IconButton(onClick = onFavorite) {
+                Icon(
+                    if (item.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = stringResource(
+                        if (item.isFavorite) R.string.favorite_remove else R.string.favorite_add,
+                    ),
+                    tint = Color.White,
+                )
+            }
         }
         if (onTrash != null) {
             IconButton(onClick = onTrash) {
@@ -441,6 +465,59 @@ private fun ViewerTopBar(
                 tint = Color.White,
             )
         }
+        ViewerMoreMenu(onEdit = onEdit, onInfo = onInfo)
+    }
+}
+
+/** The overflow button: Edit in… and the details sheet, used less often than the buttons beside it. */
+@Composable
+private fun ViewerMoreMenu(onEdit: () -> Unit, onInfo: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.viewer_more),
+                tint = Color.White,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.viewer_edit_in)) },
+                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                onClick = {
+                    open = false
+                    onEdit()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.viewer_info)) },
+                leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
+                onClick = {
+                    open = false
+                    onInfo()
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Hands the item to an editor the user picks, such as Photos or Snapseed. The editor gets to read
+ * it, not change it, so edits come back as a new copy that shows up in the grid.
+ */
+private fun editIn(context: Context, item: MediaItem) {
+    val type = item.mimeType ?: if (item.type == MediaType.VIDEO) "video/*" else "image/*"
+    val edit = Intent(Intent.ACTION_EDIT)
+        .setDataAndType(item.uri, type)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        context.startActivity(Intent.createChooser(edit, context.getString(R.string.viewer_edit_in)))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, R.string.viewer_edit_failed, Toast.LENGTH_SHORT).show()
+    } catch (e: SecurityException) {
+        // A file another app handed over may not be ours to pass on.
+        Toast.makeText(context, R.string.viewer_edit_failed, Toast.LENGTH_SHORT).show()
     }
 }
 
