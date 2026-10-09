@@ -83,4 +83,36 @@ class CropMathTest {
         assertEquals(NdcCrop(-0.5f, 0.5f, -0.5f, 0.5f), CropRect(0.25f, 0.25f, 0.75f, 0.75f).toNdc())
         assertEquals(NdcCrop(-1f, 0f, 0f, 1f), CropRect(0f, 0f, 0.5f, 0.5f).toNdc())
     }
+
+    @Test
+    fun fittingARatioTakesTheLargestCenteredBox() {
+        // A square on a frame twice as wide as tall, in fractions: half the width, all the height.
+        assertEquals(CropRect(0.25f, 0f, 0.75f, 1f), fitAspect(CropRect.Full, 0.5f))
+        // Off-center crops keep their center as far as the edges allow.
+        val shifted = fitAspect(CropRect(0f, 0f, 0.2f, 1f), 0.5f)
+        assertEquals(0f, shifted.left, 1e-6f)
+        assertEquals(0.5f, shifted.right, 1e-6f)
+    }
+
+    @Test
+    fun lockedCornersKeepTheShape() {
+        val crop = CropRect(0.2f, 0.2f, 0.6f, 0.6f)
+        val dragged = dragCropLocked(crop, CropHandle.BottomRight, 0.2f, 0.05f, 1f, 0.05f, 0.05f)
+        assertEquals(dragged.width, dragged.height, 1e-5f)
+        assertEquals(0.6f, dragged.width, 1e-5f)
+        assertEquals(0.2f, dragged.left, 1e-6f)
+        // It stops at the frame's edge without losing its shape.
+        val stopped = dragCropLocked(crop, CropHandle.BottomRight, 0.9f, 0.9f, 1f, 0.05f, 0.05f)
+        assertEquals(CropRect(0.2f, 0.2f, 1f, 1f), stopped)
+    }
+
+    @Test
+    fun lockedEdgesGrowEvenlyAcross() {
+        val crop = CropRect(0.3f, 0.3f, 0.5f, 0.5f)
+        val dragged = dragCropLocked(crop, CropHandle.Right, 0.1f, 0f, 1f, 0.05f, 0.05f)
+        assertEquals(0.3f, dragged.left, 1e-6f)
+        assertEquals(0.3f, dragged.width, 1e-5f)
+        assertEquals(0.25f, dragged.top, 1e-5f)
+        assertEquals(0.55f, dragged.bottom, 1e-5f)
+    }
 }

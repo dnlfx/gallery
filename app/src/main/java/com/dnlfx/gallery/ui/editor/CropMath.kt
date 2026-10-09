@@ -99,6 +99,75 @@ fun dragCrop(crop: CropRect, handle: CropHandle, dx: Float, dy: Float, minWidth:
     return CropRect(left, top, right, bottom)
 }
 
+/**
+ * The largest crop of [ratio] (width over height, in fractions of the frame) that fits the frame,
+ * centered where [crop] is centered as far as the edges allow.
+ */
+fun fitAspect(crop: CropRect, ratio: Float): CropRect {
+    var width = 1f
+    var height = width / ratio
+    if (height > 1f) {
+        height = 1f
+        width = ratio
+    }
+    val centerX = ((crop.left + crop.right) / 2f).coerceIn(width / 2f, 1f - width / 2f)
+    val centerY = ((crop.top + crop.bottom) / 2f).coerceIn(height / 2f, 1f - height / 2f)
+    return CropRect(centerX - width / 2f, centerY - height / 2f, centerX + width / 2f, centerY + height / 2f)
+}
+
+/**
+ * Like [dragCrop], with the box's shape kept at [ratio] (width over height, in fractions of the
+ * frame). A corner moves with the opposite corner held still; an edge moves with the opposite
+ * edge held still and the box growing evenly on both sides of it.
+ */
+fun dragCropLocked(
+    crop: CropRect,
+    handle: CropHandle,
+    dx: Float,
+    dy: Float,
+    ratio: Float,
+    minWidth: Float,
+    minHeight: Float,
+): CropRect {
+    if (handle == CropHandle.Move) return dragCrop(crop, handle, dx, dy, minWidth, minHeight)
+    val minW = min(max(minWidth, minHeight * ratio), crop.width)
+    val centerX = (crop.left + crop.right) / 2f
+    val centerY = (crop.top + crop.bottom) / 2f
+    val horizontal = handle.left || handle.right
+    val vertical = handle.top || handle.bottom
+
+    // Room to grow in each direction from what stays put.
+    val roomX = when {
+        handle.left -> crop.right
+        handle.right -> 1f - crop.left
+        else -> 2f * min(centerX, 1f - centerX)
+    }
+    val roomY = when {
+        handle.top -> crop.bottom
+        handle.bottom -> 1f - crop.top
+        else -> 2f * min(centerY, 1f - centerY)
+    }
+    val wantedWidth = if (horizontal) crop.width + (if (handle.left) -dx else dx) else 0f
+    val wantedHeight = if (vertical) crop.height + (if (handle.top) -dy else dy) else 0f
+    // A corner follows whichever way the finger went further.
+    val width = max(wantedWidth, wantedHeight * ratio)
+        .coerceAtMost(min(roomX, roomY * ratio))
+        .coerceAtLeast(minW)
+    val height = width / ratio
+
+    val left = when {
+        handle.left -> crop.right - width
+        handle.right -> crop.left
+        else -> centerX - width / 2f
+    }
+    val top = when {
+        handle.top -> crop.bottom - height
+        handle.bottom -> crop.top
+        else -> centerY - height / 2f
+    }
+    return CropRect(left, top, left + width, top + height)
+}
+
 /** A rectangle in whole pixels, right and bottom exclusive. */
 data class CropPixels(val left: Int, val top: Int, val right: Int, val bottom: Int) {
     val width: Int get() = right - left

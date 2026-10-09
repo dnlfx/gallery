@@ -45,23 +45,33 @@ fun fittedPicture(width: Float, height: Float, margin: Float, aspectRatio: Float
  * The crop box over a picture laid out as [fittedPicture] places it in this composable's bounds:
  * everything outside the box is dimmed, corners and edges resize it and dragging inside moves
  * it. The handles reach a little beyond the picture, which is what [margin] leaves room for.
+ * With a [ratio] (width over height, in fractions of the picture) the box keeps that shape.
+ * When not [interactive], it only shows the crop, dimming the rest further.
  */
 @Composable
 fun CropOverlay(
     aspectRatio: Float,
     margin: Dp,
     crop: CropRect,
+    ratio: Float?,
+    interactive: Boolean,
     onCropChange: (CropRect) -> Unit,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
     label: String,
     modifier: Modifier = Modifier,
 ) {
     val latestCrop by rememberUpdatedState(crop)
+    val latestRatio by rememberUpdatedState(ratio)
     val latestOnCropChange by rememberUpdatedState(onCropChange)
+    val latestOnDragStart by rememberUpdatedState(onDragStart)
+    val latestOnDragEnd by rememberUpdatedState(onDragEnd)
     var dragging by remember { mutableStateOf(false) }
     Box(
         modifier
             .semantics { contentDescription = label }
-            .pointerInput(aspectRatio) {
+            .pointerInput(aspectRatio, interactive) {
+                if (!interactive) return@pointerInput
                 val marginPx = margin.toPx()
                 val reach = HANDLE_REACH.toPx()
                 val minSide = MIN_CROP_SIDE.toPx()
@@ -80,6 +90,8 @@ fun CropOverlay(
                     ) ?: return@awaitEachGesture
                     down.consume()
                     dragging = true
+                    latestOnDragStart()
+                    val locked = latestRatio
                     val minWidth = min(minSide / picture.width, 1f)
                     val minHeight = min(minSide / picture.height, 1f)
                     try {
@@ -88,12 +100,19 @@ fun CropOverlay(
                             // Measured from where the finger went down, so edges held at the
                             // picture's border don't drift.
                             val moved = change.position - down.position
+                            val dx = moved.x / picture.width
+                            val dy = moved.y / picture.height
                             latestOnCropChange(
-                                dragCrop(start, handle, moved.x / picture.width, moved.y / picture.height, minWidth, minHeight),
+                                if (locked != null) {
+                                    dragCropLocked(start, handle, dx, dy, locked, minWidth, minHeight)
+                                } else {
+                                    dragCrop(start, handle, dx, dy, minWidth, minHeight)
+                                },
                             )
                         }
                     } finally {
                         dragging = false
+                        latestOnDragEnd()
                     }
                 }
             }
@@ -105,13 +124,13 @@ fun CropOverlay(
                     right = picture.left + crop.right * picture.width,
                     bottom = picture.top + crop.bottom * picture.height,
                 )
-                drawCropBox(picture, box, showGrid = dragging)
+                drawCropBox(picture, box, showGrid = dragging, showHandles = interactive)
             },
     )
 }
 
-private fun DrawScope.drawCropBox(picture: Rect, box: Rect, showGrid: Boolean) {
-    val dim = Color.Black.copy(alpha = 0.6f)
+private fun DrawScope.drawCropBox(picture: Rect, box: Rect, showGrid: Boolean, showHandles: Boolean) {
+    val dim = Color.Black.copy(alpha = if (showHandles) 0.6f else 0.85f)
     // The picture outside the box, in four strips around it.
     drawRect(dim, Offset(picture.left, picture.top), Size(picture.width, box.top - picture.top))
     drawRect(dim, Offset(picture.left, box.bottom), Size(picture.width, picture.bottom - box.bottom))
@@ -128,6 +147,7 @@ private fun DrawScope.drawCropBox(picture: Rect, box: Rect, showGrid: Boolean) {
             drawLine(grid, Offset(box.left, y), Offset(box.right, y), line)
         }
     }
+    if (!showHandles) return
     drawRect(Color.White, box.topLeft, box.size, style = Stroke(1.5.dp.toPx()))
 
     // Thick corner brackets and edge ticks, drawn just outside the box so they don't hide the

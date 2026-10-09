@@ -3,15 +3,27 @@ package com.dnlfx.gallery.ui.editor
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.media3.common.Effect
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.Size
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.Contrast
 import androidx.media3.effect.Crop
+import androidx.media3.effect.HslAdjustment
+import androidx.media3.effect.MatrixTransformation
+import androidx.media3.effect.RgbAdjustment
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -34,6 +46,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.OutputStream
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 import androidx.media3.common.MediaItem as PlayerMediaItem
@@ -41,7 +55,7 @@ import androidx.media3.common.MediaItem as PlayerMediaItem
 private const val TAG = "EditSaver"
 
 /**
- * Whether a crop of the photo [item] can be saved over the original: a library photo (Android 11
+ * Whether an edit of the photo [item] can be saved over the original: a library photo (Android 11
  * and later, which asks the user first) in a format the phone can write back. Anything else, like
  * HEIC or RAW, or a file another app handed over, is saved as a new copy instead.
  */
@@ -49,12 +63,12 @@ fun canOverwrite(item: MediaItem): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && item.id != EXTERNAL_ITEM_ID && item.mimeType in WRITABLE_TYPES
 
 /**
- * Replaces the photo [item] with its [crop], at full resolution and the highest quality its format
+ * Replaces the photo [item] with its [edit], at full resolution and the highest quality its format
  * allows: lossless for PNG and WebP, JPEG at quality 100. The date taken, camera details and
  * location are carried over. Needs write access to [item] (see [canOverwrite]). The new photo is
  * written out completely before the original is replaced. Returns false if it couldn't be saved.
  */
-suspend fun overwriteWithCrop(context: Context, item: MediaItem, crop: CropRect): Boolean = withContext(Dispatchers.IO) {
+suspend fun overwriteWithEdit(context: Context, item: MediaItem, edit: PhotoEdit): Boolean = withContext(Dispatchers.IO) {
     val format = when (item.mimeType) {
         "image/png" -> Bitmap.CompressFormat.PNG
         "image/webp" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -65,7 +79,7 @@ suspend fun overwriteWithCrop(context: Context, item: MediaItem, crop: CropRect)
         else -> Bitmap.CompressFormat.JPEG
     }
     val bitmap = try {
-        decodeCrop(context, item, crop)
+        renderEdit(context, item, edit)
     } catch (e: OutOfMemoryError) {
         null
     } ?: return@withContext false
@@ -119,13 +133,13 @@ private fun forgetCachedImages(context: Context, uri: Uri) {
 }
 
 /**
- * Saves [crop] of the photo [item] as a new photo next to it, at full resolution. PNGs (like
+ * Saves [edit] of the photo [item] as a new photo next to it, at full resolution. PNGs (like
  * screenshots) stay lossless PNGs; everything else becomes a JPEG at quality 100. The original is
  * never touched. Returns the new photo's uri, or null if it couldn't be saved.
  */
-suspend fun saveCroppedPhoto(context: Context, item: MediaItem, crop: CropRect): Uri? = withContext(Dispatchers.IO) {
+suspend fun saveEditedPhoto(context: Context, item: MediaItem, edit: PhotoEdit): Uri? = withContext(Dispatchers.IO) {
     val bitmap = try {
-        decodeCrop(context, item, crop)
+        renderEdit(context, item, edit)
     } catch (e: OutOfMemoryError) {
         null
     } ?: return@withContext null
@@ -149,12 +163,16 @@ suspend fun saveCroppedPhoto(context: Context, item: MediaItem, crop: CropRect):
     }
 }
 
-/** The cropped part of the photo, upright and at full resolution. */
-private fun decodeCrop(context: Context, item: MediaItem, crop: CropRect): Bitmap? {
+/** What to change in a photo. */
+data class PhotoEdit(val crop: CropRect, val transform: Transform, val adjustments: Adjustments)
+
+/** The edited photo at full resolution: turned, mirrored, straightened, cropped and adjusted. */
+private fun renderEdit(context: Context, item: MediaItem, edit: PhotoEdit): Bitmap? {
     RegionSource.open(context.contentResolver, item.uri, item.orientationDegrees)?.use { source ->
-        // Only the cropped part is decoded, so even a 50 MP photo needs no more memory than that.
-        val rect = crop.toPixels(source.width, source.height)
-        return source.decode(PixelRect(rect.left, rect.top, rect.right, rect.bottom), sampleSize = 1)
+        // Only the part the crop needs is decoded, so even a 50 MP photo needs no more memory than that.
+        return render(source.width, source.height, edit) { rect ->
+            source.decode(PixelRect(rect.left, rect.top, rect.right, rect.bottom), sampleSize = 1)
+        }
     }
     // Formats the region decoder can't read: decode the whole picture upright, then cut it.
     val whole = try {
@@ -164,14 +182,77 @@ private fun decodeCrop(context: Context, item: MediaItem, crop: CropRect): Bitma
     } catch (e: Exception) {
         null
     } ?: return null
-    val rect = crop.toPixels(whole.width, whole.height)
-    return Bitmap.createBitmap(whole, rect.left, rect.top, rect.width, rect.height).also {
-        if (it !== whole) whole.recycle()
+    return try {
+        render(whole.width, whole.height, edit) { rect ->
+            Bitmap.createBitmap(whole, rect.left, rect.top, rect.width, rect.height).let {
+                // createBitmap hands back the same bitmap for the whole picture; keep it apart.
+                if (it === whole) it.copy(it.config ?: Bitmap.Config.ARGB_8888, true) else it
+            }
+        }
+    } finally {
+        whole.recycle()
     }
 }
 
-/** What to change in a video: the part to keep (null for all of it) and the crop. */
-data class VideoEdit(val trim: TrimRange?, val crop: CropRect)
+/**
+ * Draws [edit] of a [width] by [height] upright picture. [decode] supplies the part of the
+ * picture the result needs. A crop alone hands that part straight back, pixel for pixel.
+ */
+private fun render(width: Int, height: Int, edit: PhotoEdit, decode: (CropPixels) -> Bitmap?): Bitmap? {
+    val transform = edit.transform
+    val toFrame = transform.pictureToFrame(width.toFloat(), height.toFloat())
+    val (frameWidth, frameHeight) = transform.frameSize(width.toFloat(), height.toFloat())
+    val output = edit.crop.toPixels(frameWidth.roundToInt(), frameHeight.roundToInt())
+
+    // The part of the picture under the crop. A tilt needs a pixel to spare for smoothing.
+    val back = toFrame.inverse()
+    val corners = listOf(
+        back.map(output.left.toFloat(), output.top.toFloat()),
+        back.map(output.right.toFloat(), output.top.toFloat()),
+        back.map(output.left.toFloat(), output.bottom.toFloat()),
+        back.map(output.right.toFloat(), output.bottom.toFloat()),
+    )
+    val tilted = transform.straighten != 0f
+    val spare = if (tilted) 2 else 0
+    fun low(value: Float) = (if (tilted) floor(value) else value.roundToInt().toFloat()).toInt() - spare
+    fun high(value: Float) = (if (tilted) ceil(value) else value.roundToInt().toFloat()).toInt() + spare
+    val regionLeft = low(corners.minOf { it.first }).coerceIn(0, width - 1)
+    val regionTop = low(corners.minOf { it.second }).coerceIn(0, height - 1)
+    val region = CropPixels(
+        left = regionLeft,
+        top = regionTop,
+        right = high(corners.maxOf { it.first }).coerceIn(regionLeft + 1, width),
+        bottom = high(corners.maxOf { it.second }).coerceIn(regionTop + 1, height),
+    )
+    val part = decode(region) ?: return null
+    if (transform.isIdentity && edit.adjustments.isNeutral) return part
+
+    val result = Bitmap.createBitmap(
+        output.width,
+        output.height,
+        Bitmap.Config.ARGB_8888,
+        true,
+        part.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB),
+    )
+    val matrix = Affine.translate(region.left.toFloat(), region.top.toFloat())
+        .then(toFrame)
+        .then(Affine.translate(-output.left.toFloat(), -output.top.toFloat()))
+    val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+        if (!edit.adjustments.isNeutral) colorFilter = ColorMatrixColorFilter(edit.adjustments.colorMatrix())
+    }
+    Canvas(result).drawBitmap(part, Matrix().apply { setValues(matrix.toMatrixValues()) }, paint)
+    part.recycle()
+    return result
+}
+
+/** What to change in a video: the part to keep (null for all of it), the picture, and the sound. */
+data class VideoEdit(
+    val trim: TrimRange?,
+    val crop: CropRect,
+    val transform: Transform,
+    val adjustments: Adjustments,
+    val mute: Boolean,
+)
 
 /**
  * Exports [edit] of the video [item] as a new MP4 next to it, entirely on the phone, reporting
@@ -242,19 +323,24 @@ private suspend fun export(
         }
     }.build()
     val media = PlayerMediaItem.Builder().setUri(item.uri).setClippingConfiguration(clipping).build()
-    val cropping = !edit.crop.isFull
-    // Effects work on the upright picture, which is what the crop is measured on.
-    val effects = if (cropping) {
-        val ndc = edit.crop.snapToEvenPixels(source.width, source.height).toNdc()
-        Effects(emptyList(), listOf(Crop(ndc.left, ndc.right, ndc.bottom, ndc.top)))
-    } else {
-        Effects.EMPTY
+    // Effects work on the upright picture, which is what the editor shows.
+    val (frameWidth, frameHeight) = edit.transform.frameSize(source.width.toFloat(), source.height.toFloat())
+    val videoEffects = buildList<Effect> {
+        if (!edit.transform.isIdentity) add(TurnAndTilt(edit.transform))
+        if (!edit.crop.isFull) {
+            val ndc = edit.crop.snapToEvenPixels(frameWidth.roundToInt(), frameHeight.roundToInt()).toNdc()
+            add(Crop(ndc.left, ndc.right, ndc.bottom, ndc.top))
+        }
+        addAll(colorEffects(edit.adjustments))
     }
-    val edited = EditedMediaItem.Builder(media).setEffects(effects).build()
+    val edited = EditedMediaItem.Builder(media)
+        .setEffects(Effects(emptyList(), videoEffects))
+        .setRemoveAudio(edit.mute)
+        .build()
 
     val builder = Transformer.Builder(context)
-    if (cropping) {
-        // Keep roughly the original's quality per pixel rather than the encoder's default.
+    if (videoEffects.isNotEmpty()) {
+        // Re-encoded: keep roughly the original's quality per pixel rather than the encoder's default.
         val bitrate = source.bitrate?.let { max((it * edit.crop.width * edit.crop.height).roundToInt(), MIN_BITRATE) }
         if (bitrate != null) {
             builder.setEncoderFactory(
@@ -297,6 +383,42 @@ private suspend fun export(
     } finally {
         progress.cancel()
         if (!finished.isCompleted) transformer.cancel()
+    }
+}
+
+/**
+ * Turns, mirrors and tilts each frame like [transform], into a frame of the turned size. Media3
+ * tells it the upright frame size before the first frame.
+ */
+private class TurnAndTilt(private val transform: Transform) : MatrixTransformation {
+    private val matrix = Matrix()
+
+    override fun configure(inputWidth: Int, inputHeight: Int): Size {
+        matrix.setValues(transform.videoMatrix(inputWidth.toFloat(), inputHeight.toFloat()).toMatrixValues())
+        return if (transform.sideways) Size(inputHeight, inputWidth) else Size(inputWidth, inputHeight)
+    }
+
+    override fun getMatrix(presentationTimeUs: Long): Matrix = matrix
+}
+
+/** Media3's closest equivalents of the light and color the preview shows. */
+private fun colorEffects(adjustments: Adjustments): List<Effect> = buildList {
+    if (adjustments.contrast != 0f) {
+        // Media3 stretches by (1 + c) / (1 - c); pick c for the same stretch as the preview.
+        val factor = adjustments.contrastFactor
+        add(Contrast((factor - 1f) / (factor + 1f)))
+    }
+    if (adjustments.brightness != 0f) add(Brightness(adjustments.brightnessOffset))
+    if (adjustments.saturation != 0f) {
+        add(HslAdjustment.Builder().adjustSaturation(adjustments.saturation * 100f).build())
+    }
+    if (adjustments.warmth != 0f) {
+        add(
+            RgbAdjustment.Builder()
+                .setRedScale(adjustments.redFactor)
+                .setBlueScale(adjustments.blueFactor)
+                .build(),
+        )
     }
 }
 
