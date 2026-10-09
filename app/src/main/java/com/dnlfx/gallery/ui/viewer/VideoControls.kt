@@ -10,11 +10,19 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -149,14 +158,29 @@ fun VideoBottomBar(
     }
 }
 
-/** While controls are hidden: a 2dp line along the bottom edge, the only thing over the video. */
+/** While controls are hidden: a thin line near the bottom, the only thing over the video. */
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun HairlineProgress(playback: PlaybackState, modifier: Modifier = Modifier) {
-    Canvas(modifier.fillMaxWidth().height(2.dp)) {
+    Canvas(
+        modifier
+            // The bars are hidden while this shows, but keep clear of where they'd be (the
+            // three-button bar at the bottom, or the side in landscape) and of the screen's
+            // rounded corners, which would otherwise cut the line off.
+            .windowInsetsPadding(
+                WindowInsets.systemBarsIgnoringVisibility
+                    .union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+            )
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .fillMaxWidth()
+            .height(3.dp),
+    ) {
         // Read while drawing, so progress only redraws the line.
         val fraction = progressFraction(playback.positionMillis, playback.durationMillis)
-        drawRect(Color.White.copy(alpha = 0.2f))
-        drawRect(Color.White.copy(alpha = 0.7f), size = size.copy(width = size.width * fraction))
+        val round = CornerRadius(size.height / 2f)
+        drawRoundRect(Color.White.copy(alpha = 0.25f), cornerRadius = round)
+        drawRoundRect(Color.White.copy(alpha = 0.8f), size = size.copy(width = size.width * fraction), cornerRadius = round)
     }
 }
 
