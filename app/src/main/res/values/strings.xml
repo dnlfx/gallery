@@ -43,6 +43,7 @@
     <string name="viewer_brightness">Brightness</string>
     <string name="viewer_skip_back">−%1$d s</string>
     <string name="viewer_skip_forward">+%1$d s</string>
+    <string name="viewer_hold_speed">2× speed</string>
     <string name="viewer_info">Details</string>
     <string name="viewer_delete">Move to trash</string>
     <string name="details_title">Details</string>

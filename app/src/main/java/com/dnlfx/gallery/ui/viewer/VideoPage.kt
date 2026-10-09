@@ -114,7 +114,8 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
  * - double-tap the left third to go back 10 seconds, the right third to go forward 10 seconds,
  *   and keep tapping that side to add 10 more each time; double-tap the middle to play or pause;
  * - swipe sideways to move to the previous or next item, like on a photo;
- * - press and hold for a moment, then slide sideways, to scrub through the video;
+ * - press and hold for a moment to play at double speed until the finger lifts, or hold and then
+ *   slide sideways to scrub through the video;
  * - slide up or down on the left third to change the brightness, or on the right third to change
  *   the volume; pull down in the middle to close the video, like a photo;
  * - pinch to zoom; while zoomed in, one finger moves the picture instead of scrubbing.
@@ -147,6 +148,7 @@ fun VideoPage(
     var skip by remember { mutableStateOf<SkipFeedback?>(null) }
     var skipToken by remember { mutableIntStateOf(0) }
     var scrub by remember { mutableStateOf<ScrubFeedback?>(null) }
+    var fastForwarding by remember { mutableStateOf(false) }
     var volume by remember { mutableStateOf<Float?>(null) }
     var volumeToken by remember { mutableIntStateOf(0) }
     val window = remember { context.findActivity()?.window }
@@ -318,13 +320,30 @@ fun VideoPage(
                         var startBrightness = 0f
                         var released = false
                         var upMillis = 0L
+                        var holdTotal = Offset.Zero
+                        var speedBeforeHold = 1f
+                        var playingBeforeHold = false
                         var lastMillis = down.uptimeMillis
                         velocity.addPosition(down.uptimeMillis, down.position)
+
+                        fun startScrub() {
+                            mode = DragMode.SCRUB
+                            startPosition = player.currentPosition
+                            scrubPosition = startPosition.toFloat()
+                            scrubber.begin()
+                            scrub = ScrubFeedback(startPosition, 0L, duration)
+                        }
+
+                        fun endFastForward() {
+                            player.setPlaybackSpeed(speedBeforeHold)
+                            player.playWhenReady = playingBeforeHold
+                            fastForwarding = false
+                        }
 
                         try {
                             while (true) {
                                 // Until the finger moves, wait to see whether it's held still long
-                                // enough to start scrubbing.
+                                // enough to play fast.
                                 val event = if (mode == DragMode.NONE && !multiTouch && !zoom.zoomed) {
                                     val holdLeft = viewConfiguration.longPressTimeoutMillis - (lastMillis - down.uptimeMillis)
                                     withTimeoutOrNull(holdLeft.coerceAtLeast(0L)) { awaitPointerEvent() }
@@ -332,13 +351,22 @@ fun VideoPage(
                                     awaitPointerEvent()
                                 }
                                 if (event == null) {
-                                    mode = DragMode.SCRUB
                                     interacted()
-                                    startPosition = player.currentPosition
-                                    scrubPosition = startPosition.toFloat()
-                                    scrubber.begin()
-                                    scrub = ScrubFeedback(startPosition, 0L, duration)
                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    if (player.playbackState == Player.STATE_ENDED) {
+                                        // Nothing left to play fast: go straight to scrubbing.
+                                        startScrub()
+                                    } else {
+                                        // Held still: play at double speed, even if paused, until
+                                        // the finger lifts or starts to slide.
+                                        mode = DragMode.FAST_FORWARD
+                                        holdTotal = total
+                                        speedBeforeHold = player.playbackParameters.speed
+                                        playingBeforeHold = player.playWhenReady
+                                        player.setPlaybackSpeed(HOLD_SPEED)
+                                        player.playWhenReady = true
+                                        fastForwarding = true
+                                    }
                                     continue
                                 }
                                 if (event.changes.count { it.pressed } > 1) {
@@ -372,6 +400,13 @@ fun VideoPage(
                                     if (mode != DragMode.SWIPE && mode != DragMode.DISMISS) interacted()
                                 }
                                 when (mode) {
+                                    DragMode.FAST_FORWARD -> {
+                                        // Sliding after the hold scrubs, as it always has.
+                                        if ((total - holdTotal).getDistance() > viewConfiguration.touchSlop) {
+                                            endFastForward()
+                                            startScrub()
+                                        }
+                                    }
                                     DragMode.SCRUB -> {
                                         val previous = scrubPosition
                                         scrubPosition = scrubStep(
@@ -438,7 +473,9 @@ fun VideoPage(
                                 if (mode != DragMode.NONE && mode != DragMode.SWIPE) change.consume()
                             }
                         } finally {
-                            // Also runs if the gesture is cut short, so playback always resumes.
+                            // Also runs if the gesture is cut short, so playback always goes back to
+                            // normal.
+                            if (mode == DragMode.FAST_FORWARD) endFastForward()
                             if (mode == DragMode.SCRUB) {
                                 scrubber.finish()
                                 scrub = null
@@ -528,6 +565,7 @@ fun VideoPage(
                 .align(Alignment.Center)
                 .then(if (controlsVisible) Modifier.offset(y = (-88).dp) else Modifier),
         )
+        if (fastForwarding) FastForwardBadge(Modifier.align(Alignment.TopCenter))
         if (playback.failed) {
             // Below the play button, which sits in the center.
             Pill(Modifier.align(Alignment.Center).padding(top = 160.dp)) {
@@ -615,6 +653,28 @@ private fun SkipBubble(feedback: SkipFeedback, modifier: Modifier = Modifier) {
     }
 }
 
+/** Shows while a held finger plays the video at double speed. */
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun FastForwardBadge(modifier: Modifier = Modifier) {
+    Pill(
+        modifier
+            .windowInsetsPadding(
+                WindowInsets.systemBarsIgnoringVisibility
+                    .union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Top),
+            )
+            // Below the top bar, when it's up.
+            .padding(top = 72.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.viewer_hold_speed),
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+        )
+    }
+}
+
 /** Clear of the navigation bar and camera cutout, which sit at the sides in landscape. */
 @OptIn(ExperimentalLayoutApi::class)
 private fun Modifier.levelReadoutPadding(): Modifier = this
@@ -671,7 +731,7 @@ private fun Pill(modifier: Modifier = Modifier, content: @Composable () -> Unit)
     }
 }
 
-private enum class DragMode { NONE, SCRUB, VOLUME, BRIGHTNESS, DISMISS, ZOOM, PAN, SWIPE }
+private enum class DragMode { NONE, FAST_FORWARD, SCRUB, VOLUME, BRIGHTNESS, DISMISS, ZOOM, PAN, SWIPE }
 
 private fun IntSize.toZoomSize() = VideoZoom.Size(width.toFloat(), height.toFloat())
 
@@ -680,5 +740,6 @@ private data class SkipFeedback(val forward: Boolean, val seconds: Int)
 private data class ScrubFeedback(val targetMillis: Long, val deltaMillis: Long, val durationMillis: Long)
 
 private const val FEEDBACK_MILLIS = 700L
+private const val HOLD_SPEED = 2f
 private const val POSTER_FADE_MILLIS = 150
 
