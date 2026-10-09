@@ -187,6 +187,15 @@ fun VideoPage(
             // A SurfaceView follows its view's scale and position, so zooming and pulling down to
             // close cost nothing extra. It shrinks a little as it's pulled, like a photo.
             update = {
+                // The surface keeps the video's own size and the screen scales it to fit the view.
+                // Sized to the view instead, a resize (a new video's shape, the bars coming and
+                // going) left the last frame drawn at the old size, squeezed into part of the
+                // view, until the next frame arrived, which for a paused video is never.
+                if (playback.frameWidth > 0 && playback.frameHeight > 0) {
+                    it.holder.setFixedSize(playback.frameWidth, playback.frameHeight)
+                } else {
+                    it.holder.setSizeFromLayout()
+                }
                 val shrink = 1f - DISMISS_SHRINK * dismissProgress()
                 it.scaleX = zoom.scale * shrink
                 it.scaleY = zoom.scale * shrink
