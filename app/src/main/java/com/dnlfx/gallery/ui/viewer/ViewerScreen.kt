@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -194,8 +196,10 @@ fun ViewerScreen(
 
     var controlsVisible by rememberSaveable { mutableStateOf(true) }
     var detailsOpen by rememberSaveable { mutableStateOf(false) }
-    // 0 normally, rising towards 1 as a photo is pulled down to close the viewer.
+    // 0 normally, rising towards 1 as a photo is pulled down to close the viewer. It changes every
+    // frame of the pull, so only the backdrop's drawing and this check read it.
     var dismissProgress by remember { mutableFloatStateOf(0f) }
+    val dismissing by remember { derivedStateOf { dismissProgress > 0f } }
     val requests = rememberMediaRequests()
     var interactions by remember { mutableIntStateOf(0) }
     var draggingSeekBar by remember { mutableStateOf(false) }
@@ -223,7 +227,7 @@ fun ViewerScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 1f - dismissProgress)),
+            .drawBehind { drawRect(Color.Black.copy(alpha = 1f - dismissProgress)) },
     ) {
         HorizontalPager(
             state = pagerState,
@@ -263,7 +267,7 @@ fun ViewerScreen(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible && settledItem != null && dismissProgress == 0f,
+            visible = controlsVisible && settledItem != null && !dismissing,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),

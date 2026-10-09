@@ -36,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,7 +71,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
-import com.dnlfx.gallery.thumbnail.MediaThumbnail
+import com.dnlfx.gallery.thumbnail.viewerThumbnailRequest
 import com.dnlfx.gallery.ui.grid.formatDuration
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -82,8 +83,9 @@ import kotlinx.coroutines.launch
 /** A still frame for video pages that aren't on screen, so only one player exists at a time. */
 @Composable
 fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     AsyncImage(
-        model = MediaThumbnail(item.uri, item.dateModifiedSeconds),
+        model = remember(item.uri, item.dateModifiedSeconds) { viewerThumbnailRequest(context, item) },
         contentDescription = item.displayName,
         contentScale = ContentScale.Fit,
         modifier = modifier.fillMaxSize(),
@@ -131,10 +133,13 @@ fun VideoPage(
     var playFeedback by remember { mutableStateOf<Boolean?>(null) }
     var playToken by remember { mutableIntStateOf(0) }
     var zoom by remember(item.id) { mutableStateOf(VideoZoom()) }
+    // The zoom changes on every frame of a pinch; the surface follows it on its own (see the
+    // AndroidView below), so the page itself only cares whether it's zoomed in at all.
+    val zoomed by remember(item.id) { derivedStateOf { zoom.zoomed } }
     var videoSize by remember { mutableStateOf(IntSize.Zero) }
     // While zoomed in, a swipe moves the picture rather than turning to the next item.
     val zoomedChanged by rememberUpdatedState(onZoomedChange)
-    LaunchedEffect(zoom.zoomed) { zoomedChanged(zoom.zoomed) }
+    LaunchedEffect(zoomed) { zoomedChanged(zoomed) }
     // If this page goes away while zoomed in, swipes must not stay off for whatever comes next.
     DisposableEffect(Unit) { onDispose { zoomedChanged(false) } }
 
@@ -405,25 +410,15 @@ fun VideoPage(
                 )
             }
         }
-        scrub?.let { feedback ->
+        // The scrub and volume readouts change with every finger movement, so they read their
+        // state in their own scopes and leave the rest of the page alone.
+        ScrubReadout(
+            feedback = { scrub },
             // Sits above the play button when the controls are up, so the two don't overlap.
-            val clearOfButton = if (controlsVisible) Modifier.offset(y = (-88).dp) else Modifier
-            Pill(Modifier.align(Alignment.Center).then(clearOfButton)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "${formatDuration(feedback.targetMillis)} / ${formatDuration(feedback.durationMillis)}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                    )
-                    val sign = if (feedback.deltaMillis < 0) "-" else "+"
-                    Text(
-                        text = sign + formatDuration(abs(feedback.deltaMillis)),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.8f),
-                    )
-                }
-            }
-        }
+            modifier = Modifier
+                .align(Alignment.Center)
+                .then(if (controlsVisible) Modifier.offset(y = (-88).dp) else Modifier),
+        )
         if (playback.failed) {
             // Below the play button, which sits in the center.
             Pill(Modifier.align(Alignment.Center).padding(top = 160.dp)) {
@@ -434,14 +429,40 @@ fun VideoPage(
                 )
             }
         }
-        AnimatedVisibility(
-            visible = volume != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center),
-        ) {
-            VolumeIndicator(volume ?: 0f)
+        VolumeReadout(volume = { volume }, modifier = Modifier.align(Alignment.Center))
+    }
+}
+
+@Composable
+private fun ScrubReadout(feedback: () -> ScrubFeedback?, modifier: Modifier = Modifier) {
+    val current = feedback() ?: return
+    Pill(modifier) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "${formatDuration(current.targetMillis)} / ${formatDuration(current.durationMillis)}",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+            )
+            val sign = if (current.deltaMillis < 0) "-" else "+"
+            Text(
+                text = sign + formatDuration(abs(current.deltaMillis)),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.8f),
+            )
         }
+    }
+}
+
+@Composable
+private fun VolumeReadout(volume: () -> Float?, modifier: Modifier = Modifier) {
+    val current = volume()
+    AnimatedVisibility(
+        visible = current != null,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = modifier,
+    ) {
+        VolumeIndicator(current ?: 0f)
     }
 }
 

@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -48,11 +49,16 @@ class MediaRepository(context: Context) {
     fun observeTrash(): Flow<List<MediaItem>> =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) observe(::queryTrash) else flowOf(emptyList())
 
+    /**
+     * MediaStore also reports changes to files that aren't photos or videos (a download, a
+     * document saved). Those re-read an identical list, which goes no further.
+     */
     @OptIn(FlowPreview::class)
     private fun observe(query: () -> List<MediaItem>): Flow<List<MediaItem>> =
         merge(flowOf(Unit), mediaStoreChanges().debounce(CHANGE_DEBOUNCE_MILLIS))
             .conflate()
             .map { query() }
+            .distinctUntilChanged()
             .flowOn(Dispatchers.IO)
 
     private fun mediaStoreChanges(): Flow<Unit> = callbackFlow {
