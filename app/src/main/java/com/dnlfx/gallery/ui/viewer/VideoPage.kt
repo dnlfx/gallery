@@ -676,6 +676,7 @@ private fun FastForwardBadge(modifier: Modifier = Modifier) {
 }
 
 /** Clear of the navigation bar and camera cutout, which sit at the sides in landscape. */
+@Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun Modifier.levelReadoutPadding(): Modifier = this
     .windowInsetsPadding(
