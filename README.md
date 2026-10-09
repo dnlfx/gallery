@@ -93,12 +93,13 @@ backups are turned off.
   picture in Pictures/Gallery, at the video's full resolution.
 - With TalkBack, the video offers actions to skip back or forward 10 seconds and to change the
   volume, and the seek bar can be adjusted like a slider.
-- Slide sideways anywhere on the video to scrub through it. Slow slides move precisely; quick
-  ones cover more ground. You feel a tick at the start and end.
+- Swipe sideways to move to the previous or next item, the same as on photos.
+- Press and hold anywhere on the video until you feel a buzz, then slide sideways to scrub
+  through it. Slow slides move precisely; quick ones cover more ground. You feel a tick at the
+  start and end.
 - Slide up or down to change the volume.
 - Speed button in the bottom bar: 0.25x to 3x. The speed stays set for the next video.
 - With controls hidden, progress is a 2dp line along the bottom edge.
-- On a video, sideways slides scrub, so use the arrows in the bottom bar to move to the
-  previous or next item. On photos, swipe as usual.
+- The arrows in the bottom bar also move to the previous or next item.
 - The rotate button in the top bar flips between portrait and landscape; otherwise the
   viewer follows the phone's auto-rotate setting.
