@@ -138,6 +138,15 @@ class VideoGestureMathTest {
     }
 
     @Test
+    fun aVideoRecordedSidewaysShowsWithItsSidesSwapped() {
+        assertEquals(1920 to 1080, uprightSize(1920, 1080, 0))
+        assertEquals(1080 to 1920, uprightSize(1920, 1080, 90))
+        assertEquals(1920 to 1080, uprightSize(1920, 1080, 180))
+        assertEquals(1080 to 1920, uprightSize(1920, 1080, 270))
+        assertEquals(1080 to 1920, uprightSize(1920, 1080, -90))
+    }
+
+    @Test
     fun upAndDownSlidesDependOnWhichThirdTheyStartIn() {
         assertEquals(VerticalSlide.BRIGHTNESS, verticalSlide(tapZone(100f, 1080f)))
         assertEquals(VerticalSlide.CLOSE, verticalSlide(tapZone(540f, 1080f)))

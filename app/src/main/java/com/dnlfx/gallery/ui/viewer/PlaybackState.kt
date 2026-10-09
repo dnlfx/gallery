@@ -15,6 +15,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -56,16 +57,26 @@ class PlaybackState {
     var failed by mutableStateOf(false)
         internal set
 
-    internal fun resetForNewItem() {
+    /**
+     * Starts over for a new video. [width] and [height] are its upright size as the gallery
+     * knows it, so the picture can be laid out at its own shape before the player has read the
+     * file; 0 if unknown.
+     */
+    internal fun resetForNewItem(width: Int, height: Int) {
         firstFrameRendered = false
-        aspectRatio = 0f
-        frameWidth = 0
-        frameHeight = 0
+        setFrame(width, height, pixelRatio = 1f)
         playerPositionMillis = 0L
         scrubTargetMillis = null
         durationMillis = 0L
         ended = false
         failed = false
+    }
+
+    internal fun setFrame(width: Int, height: Int, pixelRatio: Float) {
+        val known = width > 0 && height > 0
+        frameWidth = if (known) width else 0
+        frameHeight = if (known) height else 0
+        aspectRatio = if (known) width * pixelRatio / height else 0f
     }
 
     internal fun sync(player: Player) {
@@ -88,13 +99,29 @@ fun rememberPlaybackState(player: Player?): PlaybackState {
                 state.sync(player)
             }
 
-            override fun onVideoSizeChanged(videoSize: VideoSize) {
-                state.frameWidth = videoSize.width.coerceAtLeast(0)
-                state.frameHeight = videoSize.height.coerceAtLeast(0)
-                state.aspectRatio = if (videoSize.width > 0 && videoSize.height > 0) {
-                    videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
+            // The size is known three times over, each surer than the last: from the gallery
+            // (see resetForNewItem), from the file's track once it's been read, which is before
+            // any frame is decoded, and from the decoder with the first frame. Laying the picture
+            // out at the right shape before that first frame keeps it from flashing full screen.
+            override fun onTracksChanged(tracks: Tracks) {
+                val format = tracks.groups
+                    .firstOrNull { it.type == C.TRACK_TYPE_VIDEO && it.isSelected }
+                    ?.let { group -> (0 until group.length).firstOrNull { group.isTrackSelected(it) }?.let(group::getTrackFormat) }
+                    ?: return
+                val (width, height) = uprightSize(format.width, format.height, format.rotationDegrees)
+                val ratio = if (isQuarterTurn(format.rotationDegrees)) {
+                    1f / format.pixelWidthHeightRatio
                 } else {
-                    0f
+                    format.pixelWidthHeightRatio
+                }
+                state.setFrame(width, height, ratio)
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // Between videos the size is briefly unknown; keep the last one rather than
+                // flashing the full screen.
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    state.setFrame(videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio)
                 }
             }
 

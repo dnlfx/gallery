@@ -123,6 +123,16 @@ fun scrubSeekPosition(positionMillis: Long, durationMillis: Long): Long =
 fun seekLanded(framePositionUs: Long, targetUs: Long): Boolean =
     framePositionUs >= targetUs - SEEK_LANDED_BEFORE_US && framePositionUs <= targetUs + SEEK_LANDED_AFTER_US
 
+/**
+ * The size a video shows at, given its stored [width] and [height] and the clockwise rotation it
+ * plays with: a quarter turn swaps the sides.
+ */
+fun uprightSize(width: Int, height: Int, rotationDegrees: Int): Pair<Int, Int> =
+    if (isQuarterTurn(rotationDegrees)) height to width else width to height
+
+/** Whether [rotationDegrees] turns the picture on its side (90 or 270 degrees, either way). */
+fun isQuarterTurn(rotationDegrees: Int): Boolean = ((rotationDegrees % 180) + 180) % 180 == 90
+
 /** What an up or down slide on the video does, by the third of the screen it starts in. */
 enum class VerticalSlide { BRIGHTNESS, CLOSE, VOLUME }
 
