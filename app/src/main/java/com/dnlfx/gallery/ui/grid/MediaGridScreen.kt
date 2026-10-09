@@ -2,24 +2,34 @@ package com.dnlfx.gallery.ui.grid
 
 import android.content.Context
 import android.text.format.DateFormat
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -27,7 +37,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,6 +60,7 @@ import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
 import com.dnlfx.gallery.thumbnail.MediaThumbnail
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,37 +73,67 @@ fun MediaGridScreen(
     limitedAccess: Boolean,
     onRequestFullAccess: () -> Unit,
     onItemClick: (index: Int, item: MediaItem) -> Unit,
+    onFilterSelected: (MediaFilter) -> Unit,
     modifier: Modifier = Modifier,
     gridState: LazyGridState = rememberLazyGridState(),
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     val resources = LocalContext.current.resources
+    val scope = rememberCoroutineScope()
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         // Keep thumbnails and the fast scroller clear of the camera cutout and of the navigation
         // buttons, which sit at the side of the screen when the phone is turned sideways.
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(stringResource(R.string.app_name))
-                        if (state is GridState.Loaded && state.items.isNotEmpty()) {
-                            val count = state.items.size
-                            Text(
-                                text = resources.getQuantityString(
-                                    R.plurals.item_count,
-                                    count,
-                                    NumberFormat.getIntegerInstance().format(count),
-                                ),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+            // The chips sit under the app bar and share its colour, which deepens once the grid
+            // scrolls beneath it.
+            val barColor by animateColorAsState(
+                targetValue = if (scrollBehavior.state.overlappedFraction > 0.01f) {
+                    MaterialTheme.colorScheme.surfaceContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
                 },
-                scrollBehavior = scrollBehavior,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "barColor",
             )
+            Column(Modifier.background(barColor)) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(stringResource(R.string.app_name))
+                            if (state is GridState.Loaded && state.items.isNotEmpty()) {
+                                val count = state.items.size
+                                Text(
+                                    text = resources.getQuantityString(
+                                        R.plurals.item_count,
+                                        count,
+                                        NumberFormat.getIntegerInstance().format(count),
+                                    ),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = barColor,
+                        scrolledContainerColor = barColor,
+                    ),
+                    scrollBehavior = scrollBehavior,
+                )
+                if (state is GridState.Loaded && state.allItems.isNotEmpty()) {
+                    FilterRow(
+                        filters = state.filters,
+                        selected = state.filter,
+                        onSelect = { filter ->
+                            // A new filter starts from the newest item, not partway down the old list.
+                            scope.launch { gridState.scrollToItem(0) }
+                            onFilterSelected(filter)
+                        },
+                    )
+                }
+            }
         },
     ) { padding ->
         when (state) {
@@ -99,7 +142,11 @@ fun MediaGridScreen(
             }
             is GridState.Loaded -> if (state.items.isEmpty() && !limitedAccess) {
                 Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
-                    Text(stringResource(R.string.empty_library))
+                    Text(
+                        stringResource(
+                            if (state.filter == MediaFilter.ALL) R.string.empty_library else R.string.empty_filter,
+                        ),
+                    )
                 }
             } else {
                 val media = state.items
@@ -163,6 +210,29 @@ fun MediaGridScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+/** One chip per filter, scrolling sideways. All is first and starts selected. */
+@Composable
+private fun FilterRow(filters: List<MediaFilter>, selected: MediaFilter, onSelect: (MediaFilter) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(bottom = 4.dp),
+    ) {
+        items(filters, key = { it.name }) { filter ->
+            val isSelected = filter == selected
+            FilterChip(
+                selected = isSelected,
+                // Tapping the selected filter again goes back to everything.
+                onClick = { onSelect(if (isSelected) MediaFilter.ALL else filter) },
+                label = { Text(stringResource(filter.label)) },
+            )
         }
     }
 }

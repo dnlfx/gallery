@@ -22,4 +22,6 @@ data class MediaItem(
     val sizeBytes: Long,
     /** Folder on shared storage, like "DCIM/Camera/", when known. */
     val relativePath: String? = null,
+    /** Starred in Photos, Files or another app. Always false before Android 11. */
+    val isFavorite: Boolean = false,
 )
