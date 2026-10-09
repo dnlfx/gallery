@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -107,6 +108,7 @@ fun VideoPage(
     player: ExoPlayer,
     scrubber: Scrubber,
     playback: PlaybackState,
+    controlsVisible: Boolean,
     onToggleControls: () -> Unit,
     onTogglePlay: () -> Unit,
     onInteraction: () -> Unit,
@@ -391,7 +393,9 @@ fun VideoPage(
                     .padding(horizontal = 48.dp),
             )
         }
-        playFeedback?.let { playing ->
+        // With the controls up, the play button in the middle already flips to show the new state,
+        // so a second icon on top of it would only clash with it.
+        playFeedback?.takeUnless { controlsVisible }?.let { playing ->
             Pill(Modifier.align(Alignment.Center)) {
                 Icon(
                     imageVector = if (playing) Icons.Filled.PlayArrow else ViewerIcons.Pause,
@@ -402,7 +406,9 @@ fun VideoPage(
             }
         }
         scrub?.let { feedback ->
-            Pill(Modifier.align(Alignment.Center)) {
+            // Sits above the play button when the controls are up, so the two don't overlap.
+            val clearOfButton = if (controlsVisible) Modifier.offset(y = (-88).dp) else Modifier
+            Pill(Modifier.align(Alignment.Center).then(clearOfButton)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "${formatDuration(feedback.targetMillis)} / ${formatDuration(feedback.durationMillis)}",

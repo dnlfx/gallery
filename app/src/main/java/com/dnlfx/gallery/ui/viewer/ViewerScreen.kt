@@ -236,6 +236,7 @@ fun ViewerScreen(
                         player = player,
                         scrubber = scrubber,
                         playback = playback,
+                        controlsVisible = controlsVisible,
                         onToggleControls = { controlsVisible = !controlsVisible },
                         onTogglePlay = { togglePlayback(player) },
                         onInteraction = { interactions++ },
