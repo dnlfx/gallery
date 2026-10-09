@@ -4,8 +4,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.media3.common.MimeTypes
@@ -19,6 +21,8 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import coil3.SingletonImageLoader
+import com.dnlfx.gallery.data.EXTERNAL_ITEM_ID
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.ui.viewer.PixelRect
 import com.dnlfx.gallery.ui.viewer.RegionSource
@@ -37,8 +41,86 @@ import androidx.media3.common.MediaItem as PlayerMediaItem
 private const val TAG = "EditSaver"
 
 /**
+ * Whether a crop of the photo [item] can be saved over the original: a library photo (Android 11
+ * and later, which asks the user first) in a format the phone can write back. Anything else, like
+ * HEIC or RAW, or a file another app handed over, is saved as a new copy instead.
+ */
+fun canOverwrite(item: MediaItem): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && item.id != EXTERNAL_ITEM_ID && item.mimeType in WRITABLE_TYPES
+
+/**
+ * Replaces the photo [item] with its [crop], at full resolution and the highest quality its format
+ * allows: lossless for PNG and WebP, JPEG at quality 100. The date taken, camera details and
+ * location are carried over. Needs write access to [item] (see [canOverwrite]). The new photo is
+ * written out completely before the original is replaced. Returns false if it couldn't be saved.
+ */
+suspend fun overwriteWithCrop(context: Context, item: MediaItem, crop: CropRect): Boolean = withContext(Dispatchers.IO) {
+    val format = when (item.mimeType) {
+        "image/png" -> Bitmap.CompressFormat.PNG
+        "image/webp" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Bitmap.CompressFormat.WEBP_LOSSLESS
+        } else {
+            return@withContext false
+        }
+        else -> Bitmap.CompressFormat.JPEG
+    }
+    val bitmap = try {
+        decodeCrop(context, item, crop)
+    } catch (e: OutOfMemoryError) {
+        null
+    } ?: return@withContext false
+    val folder = File(context.cacheDir, "edits").apply { mkdirs() }
+    val cropped = File(folder, "crop-${System.nanoTime()}")
+    try {
+        val encoded = try {
+            cropped.outputStream().use { bitmap.compress(format, 100, it) }
+        } finally {
+            bitmap.recycle()
+        }
+        if (!encoded) return@withContext false
+        copyMetadata(context, item.uri, cropped)
+        context.contentResolver.openOutputStream(item.uri, "wt")?.use { out ->
+            cropped.inputStream().use { it.copyTo(out) }
+        } ?: return@withContext false
+        forgetCachedImages(context, item.uri)
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Couldn't save over ${item.uri}", e)
+        false
+    } finally {
+        cropped.delete()
+    }
+}
+
+/**
+ * Copies the original's photo details (dates, camera, exposure, location) onto the cropped file,
+ * which is already upright, so its orientation is reset. Best effort: a photo without them, or a
+ * format that can't hold them, keeps going without.
+ */
+private fun copyMetadata(context: Context, original: Uri, cropped: File) {
+    try {
+        val source = context.contentResolver.openInputStream(original)?.use { ExifInterface(it) } ?: return
+        val target = ExifInterface(cropped.absolutePath)
+        for (tag in KEPT_EXIF_TAGS) {
+            source.getAttribute(tag)?.let { target.setAttribute(tag, it) }
+        }
+        target.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
+        target.saveAttributes()
+    } catch (e: Exception) {
+        Log.w(TAG, "Couldn't carry the photo details over", e)
+    }
+}
+
+/** Drops images of [uri] decoded before it changed, so the viewer shows the new version. */
+private fun forgetCachedImages(context: Context, uri: Uri) {
+    val cache = SingletonImageLoader.get(context).memoryCache ?: return
+    val key = uri.toString()
+    cache.keys.filter { it.key == key }.forEach { cache.remove(it) }
+}
+
+/**
  * Saves [crop] of the photo [item] as a new photo next to it, at full resolution. PNGs (like
- * screenshots) stay lossless PNGs; everything else becomes a high-quality JPEG. The original is
+ * screenshots) stay lossless PNGs; everything else becomes a JPEG at quality 100. The original is
  * never touched. Returns the new photo's uri, or null if it couldn't be saved.
  */
 suspend fun saveCroppedPhoto(context: Context, item: MediaItem, crop: CropRect): Uri? = withContext(Dispatchers.IO) {
@@ -363,7 +445,47 @@ suspend fun loadTimelineFrames(
 }
 
 private val LOSSLESS_TYPES = setOf("image/png", "image/webp", "image/gif")
-private const val JPEG_QUALITY = 95
+
+/** Formats a crop can be written back in. */
+private val WRITABLE_TYPES = setOf("image/jpeg", "image/png", "image/webp")
+private const val JPEG_QUALITY = 100
+
+/** Photo details worth keeping when a photo is replaced by its crop. */
+private val KEPT_EXIF_TAGS = listOf(
+    ExifInterface.TAG_DATETIME,
+    ExifInterface.TAG_DATETIME_ORIGINAL,
+    ExifInterface.TAG_DATETIME_DIGITIZED,
+    ExifInterface.TAG_OFFSET_TIME,
+    ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
+    ExifInterface.TAG_OFFSET_TIME_DIGITIZED,
+    ExifInterface.TAG_SUBSEC_TIME,
+    ExifInterface.TAG_SUBSEC_TIME_ORIGINAL,
+    ExifInterface.TAG_SUBSEC_TIME_DIGITIZED,
+    ExifInterface.TAG_MAKE,
+    ExifInterface.TAG_MODEL,
+    ExifInterface.TAG_LENS_MAKE,
+    ExifInterface.TAG_LENS_MODEL,
+    ExifInterface.TAG_EXPOSURE_TIME,
+    ExifInterface.TAG_F_NUMBER,
+    ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+    ExifInterface.TAG_FOCAL_LENGTH,
+    ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+    ExifInterface.TAG_FLASH,
+    ExifInterface.TAG_WHITE_BALANCE,
+    ExifInterface.TAG_IMAGE_DESCRIPTION,
+    ExifInterface.TAG_USER_COMMENT,
+    ExifInterface.TAG_ARTIST,
+    ExifInterface.TAG_COPYRIGHT,
+    ExifInterface.TAG_GPS_LATITUDE,
+    ExifInterface.TAG_GPS_LATITUDE_REF,
+    ExifInterface.TAG_GPS_LONGITUDE,
+    ExifInterface.TAG_GPS_LONGITUDE_REF,
+    ExifInterface.TAG_GPS_ALTITUDE,
+    ExifInterface.TAG_GPS_ALTITUDE_REF,
+    ExifInterface.TAG_GPS_TIMESTAMP,
+    ExifInterface.TAG_GPS_DATESTAMP,
+    ExifInterface.TAG_GPS_PROCESSING_METHOD,
+)
 private const val MIN_BITRATE = 2_000_000
 private const val PROGRESS_POLL_MILLIS = 200L
 

@@ -1,9 +1,6 @@
 package com.dnlfx.gallery.ui.viewer
 
-import android.content.ActivityNotFoundException
 import android.content.ContentUris
-import android.content.Context
-import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.widget.Toast
@@ -45,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -228,13 +226,16 @@ fun ViewerScreen(
             val item = latestItems[page]
             val onCurrentPage = page == pagerState.settledPage
             when (item.type) {
-                MediaType.IMAGE -> ZoomableImage(
-                    item = item,
-                    isCurrentPage = onCurrentPage,
-                    onTap = { controlsVisible = !controlsVisible },
-                    onDismissProgress = { dismissProgress = it },
-                    onDismiss = onClose,
-                )
+                // Starts afresh when the photo itself changes, like after saving a crop over it.
+                MediaType.IMAGE -> key(item.dateModifiedSeconds) {
+                    ZoomableImage(
+                        item = item,
+                        isCurrentPage = onCurrentPage,
+                        onTap = { controlsVisible = !controlsVisible },
+                        onDismissProgress = { dismissProgress = it },
+                        onDismiss = onClose,
+                    )
+                }
                 MediaType.VIDEO -> if (onCurrentPage && item.id == video?.id && player != null && scrubber != null) {
                     VideoPage(
                         item = item,
@@ -280,11 +281,10 @@ fun ViewerScreen(
                     } else {
                         null
                     },
-                    onEdit = { editIn(context, item) },
-                    // Animated GIFs would lose their animation, so they're left to other editors.
-                    onCrop = if (item.mimeType != "image/gif") {
+                    // Animated GIFs would lose their animation, so they aren't edited.
+                    onEdit = if (item.mimeType != "image/gif") {
                         {
-                            player.pause()
+                            player?.pause()
                             controlsVisible = true
                             editing = item
                         }
@@ -403,8 +403,7 @@ private fun ViewerTopBar(
     onBack: () -> Unit,
     onInfo: () -> Unit,
     onSaveFrame: (() -> Unit)?,
-    onEdit: () -> Unit,
-    onCrop: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
     onFavorite: (() -> Unit)?,
     onTrash: (() -> Unit)?,
     onRotate: () -> Unit,
@@ -483,21 +482,13 @@ private fun ViewerTopBar(
                 tint = Color.White,
             )
         }
-        ViewerMoreMenu(
-            cropLabel = stringResource(if (item.type == MediaType.VIDEO) R.string.viewer_crop_trim else R.string.viewer_crop),
-            onCrop = onCrop,
-            onEdit = onEdit,
-            onInfo = onInfo,
-        )
+        ViewerMoreMenu(onEdit = onEdit, onInfo = onInfo)
     }
 }
 
-/**
- * The overflow button: the built-in crop (and trim) editor, Edit in… and the details sheet, used
- * less often than the buttons beside it.
- */
+/** The overflow button: the editor and the details sheet, used less often than the buttons beside it. */
 @Composable
-private fun ViewerMoreMenu(cropLabel: String, onCrop: (() -> Unit)?, onEdit: () -> Unit, onInfo: () -> Unit) {
+private fun ViewerMoreMenu(onEdit: (() -> Unit)?, onInfo: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -508,24 +499,16 @@ private fun ViewerMoreMenu(cropLabel: String, onCrop: (() -> Unit)?, onEdit: () 
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (onCrop != null) {
+            if (onEdit != null) {
                 DropdownMenuItem(
-                    text = { Text(cropLabel) },
-                    leadingIcon = { Icon(ViewerIcons.Crop, contentDescription = null) },
+                    text = { Text(stringResource(R.string.viewer_edit)) },
+                    leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
                     onClick = {
                         open = false
-                        onCrop()
+                        onEdit()
                     },
                 )
             }
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.viewer_edit_in)) },
-                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                onClick = {
-                    open = false
-                    onEdit()
-                },
-            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.viewer_info)) },
                 leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
@@ -535,25 +518,6 @@ private fun ViewerMoreMenu(cropLabel: String, onCrop: (() -> Unit)?, onEdit: () 
                 },
             )
         }
-    }
-}
-
-/**
- * Hands the item to an editor the user picks, such as Photos or Snapseed. The editor gets to read
- * it, not change it, so edits come back as a new copy that shows up in the grid.
- */
-private fun editIn(context: Context, item: MediaItem) {
-    val type = item.mimeType ?: if (item.type == MediaType.VIDEO) "video/*" else "image/*"
-    val edit = Intent(Intent.ACTION_EDIT)
-        .setDataAndType(item.uri, type)
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    try {
-        context.startActivity(Intent.createChooser(edit, context.getString(R.string.viewer_edit_in)))
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, R.string.viewer_edit_failed, Toast.LENGTH_SHORT).show()
-    } catch (e: SecurityException) {
-        // A file another app handed over may not be ours to pass on.
-        Toast.makeText(context, R.string.viewer_edit_failed, Toast.LENGTH_SHORT).show()
     }
 }
 

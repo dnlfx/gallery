@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.view.TextureView
 import android.widget.Toast
+import androidx.annotation.StringRes
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -69,6 +70,7 @@ import coil3.compose.AsyncImage
 import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
+import com.dnlfx.gallery.ui.rememberMediaRequests
 import com.dnlfx.gallery.ui.viewer.VideoPoster
 import com.dnlfx.gallery.ui.viewer.ViewerIcons
 import com.dnlfx.gallery.ui.viewer.rememberPlaybackState
@@ -79,8 +81,10 @@ import kotlinx.coroutines.launch
 import androidx.media3.common.MediaItem as PlayerMediaItem
 
 /**
- * The built-in editor, over the viewer: crop for photos, crop and trim for videos. Every edit is
- * saved as a new copy; the original stays as it is. [onSaved] gets the copy's uri.
+ * The built-in editor, over the viewer: crop for photos, crop and trim for videos. A cropped
+ * photo replaces the original (after the system asks), or becomes a new copy in formats that
+ * can't be written back; an edited video is always a new copy. [onSaved] gets the uri of
+ * whatever was saved.
  */
 @Composable
 fun EditorScreen(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> Unit) {
@@ -124,16 +128,29 @@ private fun PhotoEditor(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> 
     var aspectRatio by remember { mutableFloatStateOf(0f) }
     var detecting by remember { mutableStateOf(false) }
     val saving = remember { SaveState() }
+    val requests = rememberMediaRequests()
+    val overwrite = remember(item) { canOverwrite(item) }
 
     EditorScaffold(
-        title = stringResource(R.string.editor_crop),
+        title = stringResource(R.string.editor_title),
+        saveLabel = stringResource(if (overwrite) R.string.editor_save else R.string.editor_save_copy),
         canSave = !crop.isFull,
         saving = saving,
         onClose = onClose,
         onSave = {
-            saving.start(scope) {
-                val uri = saveCroppedPhoto(context, item, crop)
-                finishSave(context, uri, onSaved)
+            if (overwrite) {
+                // The system asks before the original is changed; nothing happens if it's declined.
+                requests.write(listOf(item.uri)) {
+                    saving.start(scope) {
+                        val saved = overwriteWithCrop(context, item, crop)
+                        finishSave(context, if (saved) item.uri else null, R.string.editor_saved, onSaved)
+                    }
+                }
+            } else {
+                saving.start(scope) {
+                    val uri = saveCroppedPhoto(context, item, crop)
+                    finishSave(context, uri, R.string.editor_saved_copy, onSaved)
+                }
             }
         },
         crop = crop,
@@ -221,7 +238,8 @@ private fun VideoEditor(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> 
 
     val range = trim
     EditorScaffold(
-        title = stringResource(R.string.editor_crop_trim),
+        title = stringResource(R.string.editor_title),
+        saveLabel = stringResource(R.string.editor_save_copy),
         canSave = range != null && (!crop.isFull || !range.isWhole(duration)),
         saving = saving,
         onClose = onClose,
@@ -231,7 +249,7 @@ private fun VideoEditor(item: MediaItem, onClose: () -> Unit, onSaved: (Uri) -> 
                 saving.start(scope) {
                     val edit = VideoEdit(trim = range.takeUnless { it.isWhole(duration) }, crop = crop)
                     val uri = saveEditedVideo(context, item, edit) { saving.progress = it }
-                    finishSave(context, uri, onSaved)
+                    finishSave(context, uri, R.string.editor_saved_copy, onSaved)
                 }
             }
         },
@@ -348,11 +366,11 @@ private fun applyAutoFit(context: Context, found: CropRect?, apply: (CropRect) -
     }
 }
 
-private fun finishSave(context: Context, uri: Uri?, onSaved: (Uri) -> Unit) {
+private fun finishSave(context: Context, uri: Uri?, @StringRes savedMessage: Int, onSaved: (Uri) -> Unit) {
     if (uri == null) {
         Toast.makeText(context, R.string.editor_save_failed, Toast.LENGTH_SHORT).show()
     } else {
-        Toast.makeText(context, R.string.editor_saved, Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, savedMessage, Toast.LENGTH_SHORT).show()
         onSaved(uri)
     }
 }
@@ -360,6 +378,7 @@ private fun finishSave(context: Context, uri: Uri?, onSaved: (Uri) -> Unit) {
 @Composable
 private fun EditorScaffold(
     title: String,
+    saveLabel: String,
     canSave: Boolean,
     saving: SaveState,
     onClose: () -> Unit,
@@ -405,7 +424,7 @@ private fun EditorScaffold(
                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
             )
             TextButton(onClick = onSave, enabled = canSave && saving.job == null, colors = buttonColors) {
-                Text(stringResource(R.string.editor_save))
+                Text(saveLabel)
             }
         }
 

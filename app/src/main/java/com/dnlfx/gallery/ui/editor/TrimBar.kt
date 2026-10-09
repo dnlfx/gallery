@@ -62,7 +62,7 @@ fun TrimBar(
     Box(
         modifier
             .fillMaxWidth()
-            .height(BAR_HEIGHT + 2 * HANDLE_OVERHANG)
+            .height(BAR_HEIGHT + HANDLE_OVERHANG * 2)
             .semantics {
                 contentDescription = label
                 stateDescription = stateLabel

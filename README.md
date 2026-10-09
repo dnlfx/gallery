@@ -64,11 +64,11 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
 - `ui/viewer/` Full-screen viewer: swipe between items in grid order, pinch or double-tap to
   zoom photos, swipe a photo down to close, Media3 video playback. The top bar has a favorite
   button and a trash button (Android 11+), which moves the item to the system trash after the
-  system's own confirmation, recoverable for 30 days. Its menu has Edit in…, which hands the item
-  to an editor such as Photos or Snapseed (edits come back as a new copy), and details (dates,
-  folder, resolution, size).
-- `ui/editor/` The built-in editor, opened from the viewer's menu: Crop for photos, Crop & trim
-  for videos (see below).
+  system's own confirmation, recoverable for 30 days. Its menu has Edit, which opens the built-in editor
+  (there's no handing items to other apps' editors), and details (dates, folder, resolution,
+  size).
+- `ui/editor/` The built-in editor, opened with Edit in the viewer's menu: crop for photos, crop
+  and trim for videos (see below).
 
 Other apps (Files, Messages, the camera) can open a photo or video in Gallery. One that's in the
 library opens among its neighbours; anything else opens on its own, without needing the photos
@@ -84,15 +84,20 @@ permission.
   H.264, HEVC, VP9 and AV1. A video the phone can't decode shows a message instead of a black
   screen.
 
-## Crop and trim
+## Editing
 
-The viewer's menu opens a small editor that runs entirely on the phone. Saving always makes a new
-copy next to the original (or in Pictures/Gallery or Movies/Gallery where that isn't allowed),
-and the viewer moves to the copy; the original is never changed.
+Edit in the viewer's menu opens the built-in editor, which runs entirely on the phone. Animated
+GIFs aren't offered it.
 
+- Saving a cropped photo replaces the original, after the system asks for permission (Android 11
+  and later). It's cut from the original at full resolution and saved at the best quality the
+  format allows: PNG and WebP losslessly, JPEG at quality 100. The date taken, camera details and
+  location carry over. Formats the phone can't write back (HEIC, AVIF, RAW), files other apps
+  handed over, and Android 10 get a new copy instead.
+- An edited video is always saved as a new copy next to the original, and the viewer moves to it.
+  Copies go in Pictures/Gallery or Movies/Gallery where the original's folder can't take them.
 - Crop: a box starts around the whole photo or video. Drag a corner or edge to resize it, or drag
-  inside to move it. Photos are cut from the original at full resolution; PNGs such as
-  screenshots stay lossless.
+  inside to move it.
 - Auto fit: finds the picture inside black bars and flat app chrome (status bar, navigation bar,
   toolbars) and sets the box to it, ready to adjust. For videos it checks several frames, so a
   dark scene doesn't throw it off. It's a best guess and leaves edges alone when unsure, such as

@@ -46,6 +46,12 @@ class MediaRequests internal constructor(
         launch(MediaStore.createDeleteRequest(resolver, uris), onApproved)
     }
 
+    /** Asks to change items in place, like saving a cropped photo over the original. */
+    fun write(uris: Collection<Uri>, onApproved: () -> Unit) {
+        if (uris.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        launch(MediaStore.createWriteRequest(resolver, uris), onApproved)
+    }
+
     /** Stars items, or unstars them when [favorite] is false. The same flag Photos and Files use. */
     fun favorite(uris: Collection<Uri>, favorite: Boolean, onApproved: () -> Unit = {}) {
         if (uris.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
