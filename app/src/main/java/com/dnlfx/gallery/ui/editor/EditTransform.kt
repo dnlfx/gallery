@@ -264,3 +264,9 @@ fun lockedRatio(choice: AspectChoice, portrait: Boolean, frameAspect: Float): Fl
     }
     return if (portrait) 1f / landscape else landscape
 }
+
+/**
+ * A width-to-height [pixelRatio] as a ratio of fractions of a frame of [frameAspect], which is
+ * what the crop box measures in.
+ */
+fun fractionRatio(pixelRatio: Float, frameAspect: Float): Float = pixelRatio / frameAspect

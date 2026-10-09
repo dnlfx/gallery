@@ -128,4 +128,10 @@ class EditTransformTest {
         assertEquals(0.75f, lockedRatio(AspectChoice.Original, portrait = true, frameAspect = 0.75f)!!, 1e-5f)
         assertEquals(1f, lockedRatio(AspectChoice.Square, portrait = true, frameAspect = 0.75f)!!, 1e-5f)
     }
+
+    @Test
+    fun aSquareOnAWideFrameIsNarrowerInFractions() {
+        // A square on a 2:1 frame spans half as much of the width as of the height.
+        assertEquals(0.5f, fractionRatio(1f, 2f), 1e-6f)
+    }
 }
