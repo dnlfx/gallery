@@ -67,6 +67,8 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
   system's own confirmation, recoverable for 30 days. Its menu has Edit in…, which hands the item
   to an editor such as Photos or Snapseed (edits come back as a new copy), and details (dates,
   folder, resolution, size).
+- `ui/editor/` The built-in editor, opened from the viewer's menu: Crop for photos, Crop & trim
+  for videos (see below).
 
 Other apps (Files, Messages, the camera) can open a photo or video in Gallery. One that's in the
 library opens among its neighbours; anything else opens on its own, without needing the photos
@@ -81,6 +83,25 @@ permission.
 - Video: anything Media3 and the phone's decoders handle, including MP4, MKV, WebM and 3GP with
   H.264, HEVC, VP9 and AV1. A video the phone can't decode shows a message instead of a black
   screen.
+
+## Crop and trim
+
+The viewer's menu opens a small editor that runs entirely on the phone. Saving always makes a new
+copy next to the original (or in Pictures/Gallery or Movies/Gallery where that isn't allowed),
+and the viewer moves to the copy; the original is never changed.
+
+- Crop: a box starts around the whole photo or video. Drag a corner or edge to resize it, or drag
+  inside to move it. Photos are cut from the original at full resolution; PNGs such as
+  screenshots stay lossless.
+- Auto fit: finds the picture inside black bars and flat app chrome (status bar, navigation bar,
+  toolbars) and sets the box to it, ready to adjust. For videos it checks several frames, so a
+  dark scene doesn't throw it off. It's a best guess and leaves edges alone when unsure, such as
+  a clear sky at the top of a photo.
+- Trim (videos): drag the handles at each end of the frame strip to choose the part to keep; the
+  video shows the frame under the handle and plays the kept part on a loop. Trim and crop can be
+  saved together. A trim alone copies the video as it is apart from its first moments, so it's
+  quick and keeps the original quality; a crop re-encodes it on the phone's hardware encoder
+  (Media3 Transformer).
 
 ## Privacy
 

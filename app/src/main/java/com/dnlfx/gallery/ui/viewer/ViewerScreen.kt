@@ -1,6 +1,7 @@
 package com.dnlfx.gallery.ui.viewer
 
 import android.content.ActivityNotFoundException
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -78,6 +79,7 @@ import com.dnlfx.gallery.data.EXTERNAL_ITEM_ID
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.MediaType
 import com.dnlfx.gallery.ui.canChangeMedia
+import com.dnlfx.gallery.ui.editor.EditorScreen
 import com.dnlfx.gallery.ui.findActivity
 import com.dnlfx.gallery.ui.rememberMediaRequests
 import kotlinx.coroutines.delay
@@ -109,6 +111,9 @@ fun ViewerScreen(
     val startIndex = remember { items.indexOfFirst { it.id == startItemId }.coerceAtLeast(0) }
     val pagerState = rememberPagerState(initialPage = startIndex) { items.size }
     var currentId by remember { mutableLongStateOf(startItemId) }
+    // The item open in the built-in editor, and a copy it saved to show once it's in the library.
+    var editing by remember { mutableStateOf<MediaItem?>(null) }
+    var revealId by remember { mutableStateOf<Long?>(null) }
     val settledItem = items.getOrNull(pagerState.settledPage)
 
     BackHandler(onBack = onClose)
@@ -121,10 +126,19 @@ fun ViewerScreen(
             }
         }
     }
-    // The library can change underneath (a new photo, a deletion): stay on the same item.
-    LaunchedEffect(items) {
+    // The library can change underneath (a new photo, a deletion): stay on the same item, or move
+    // to a copy the editor just saved once it shows up.
+    LaunchedEffect(items, revealId) {
         if (items.isEmpty()) {
             onClose()
+            return@LaunchedEffect
+        }
+        val revealIndex = revealId?.let { id -> items.indexOfFirst { it.id == id } } ?: -1
+        if (revealIndex >= 0) {
+            pagerState.scrollToPage(revealIndex)
+            currentId = items[revealIndex].id
+            latestOnCurrentItemChange(currentId)
+            revealId = null
             return@LaunchedEffect
         }
         val index = items.indexOfFirst { it.id == currentId }
@@ -290,6 +304,16 @@ fun ViewerScreen(
                         null
                     },
                     onEdit = { editIn(context, item) },
+                    // Animated GIFs would lose their animation, so they're left to other editors.
+                    onCrop = if (item.mimeType != "image/gif") {
+                        {
+                            player.pause()
+                            controlsVisible = true
+                            editing = item
+                        }
+                    } else {
+                        null
+                    },
                     // Only library items can be starred or trashed, not files other apps handed over.
                     onFavorite = if (canChangeMedia && item.id != EXTERNAL_ITEM_ID) {
                         { requests.favorite(listOf(item.uri), !item.isFavorite) }
@@ -366,6 +390,17 @@ fun ViewerScreen(
                 HairlineProgress(playback, Modifier.align(Alignment.BottomCenter))
             }
         }
+
+        editing?.let { item ->
+            EditorScreen(
+                item = item,
+                onClose = { editing = null },
+                onSaved = { uri ->
+                    editing = null
+                    revealId = ContentUris.parseId(uri)
+                },
+            )
+        }
     }
 
     if (detailsOpen) {
@@ -392,6 +427,7 @@ private fun ViewerTopBar(
     onInfo: () -> Unit,
     onSaveFrame: (() -> Unit)?,
     onEdit: () -> Unit,
+    onCrop: (() -> Unit)?,
     onFavorite: (() -> Unit)?,
     onTrash: (() -> Unit)?,
     onRotate: () -> Unit,
@@ -470,13 +506,21 @@ private fun ViewerTopBar(
                 tint = Color.White,
             )
         }
-        ViewerMoreMenu(onEdit = onEdit, onInfo = onInfo)
+        ViewerMoreMenu(
+            cropLabel = stringResource(if (item.type == MediaType.VIDEO) R.string.viewer_crop_trim else R.string.viewer_crop),
+            onCrop = onCrop,
+            onEdit = onEdit,
+            onInfo = onInfo,
+        )
     }
 }
 
-/** The overflow button: Edit in… and the details sheet, used less often than the buttons beside it. */
+/**
+ * The overflow button: the built-in crop (and trim) editor, Edit in… and the details sheet, used
+ * less often than the buttons beside it.
+ */
 @Composable
-private fun ViewerMoreMenu(onEdit: () -> Unit, onInfo: () -> Unit) {
+private fun ViewerMoreMenu(cropLabel: String, onCrop: (() -> Unit)?, onEdit: () -> Unit, onInfo: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -487,6 +531,16 @@ private fun ViewerMoreMenu(onEdit: () -> Unit, onInfo: () -> Unit) {
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (onCrop != null) {
+                DropdownMenuItem(
+                    text = { Text(cropLabel) },
+                    leadingIcon = { Icon(ViewerIcons.Crop, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        onCrop()
+                    },
+                )
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.viewer_edit_in)) },
                 leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
