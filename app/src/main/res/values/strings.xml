@@ -19,8 +19,6 @@
     <string name="viewer_rotate">Rotate screen</string>
     <string name="viewer_play">Play</string>
     <string name="viewer_pause">Pause</string>
-    <string name="viewer_previous">Previous item</string>
-    <string name="viewer_next">Next item</string>
     <string name="viewer_volume">Volume</string>
     <string name="viewer_skip_back">−%1$d s</string>
     <string name="viewer_skip_forward">+%1$d s</string>

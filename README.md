@@ -100,6 +100,5 @@ backups are turned off.
 - Slide up or down to change the volume.
 - Speed button in the bottom bar: 0.25x to 3x. The speed stays set for the next video.
 - With controls hidden, progress is a 2dp line along the bottom edge.
-- The arrows in the bottom bar also move to the previous or next item.
 - The rotate button in the top bar flips between portrait and landscape; otherwise the
   viewer follows the phone's auto-rotate setting.

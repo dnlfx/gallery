@@ -135,7 +135,7 @@ fun VideoPage(
     // While zoomed in, a swipe moves the picture rather than turning to the next item.
     val zoomedChanged by rememberUpdatedState(onZoomedChange)
     LaunchedEffect(zoom.zoomed) { zoomedChanged(zoom.zoomed) }
-    // Leaving a zoomed video by its arrows must not keep swipes off on the next item.
+    // If this page goes away while zoomed in, swipes must not stay off for whatever comes next.
     DisposableEffect(Unit) { onDispose { zoomedChanged(false) } }
 
     LaunchedEffect(skipToken) {

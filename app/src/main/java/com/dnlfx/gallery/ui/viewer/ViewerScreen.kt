@@ -313,7 +313,6 @@ fun ViewerScreen(
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
-                val page = pagerState.settledPage
                 VideoBottomBar(
                     playback = playback,
                     speed = speed,
@@ -334,10 +333,6 @@ fun ViewerScreen(
                         draggingSeekBar = false
                         scrubber.finish()
                     },
-                    hasPrevious = page > 0,
-                    hasNext = page < items.lastIndex,
-                    onPrevious = { scope.launch { pagerState.animateScrollToPage(page - 1) } },
-                    onNext = { scope.launch { pagerState.animateScrollToPage(page + 1) } },
                     onInteraction = { interactions++ },
                     modifier = Modifier.windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
