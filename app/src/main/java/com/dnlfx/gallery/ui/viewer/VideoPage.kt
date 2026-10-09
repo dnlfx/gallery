@@ -20,16 +20,23 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -510,17 +517,18 @@ fun VideoPage(
                 )
             }
         }
+        // Each level shows on the side of the screen whose slide changes it.
         LevelReadout(
             level = { volume },
             icon = { if (it <= 0f) ViewerIcons.VolumeOff else ViewerIcons.VolumeUp },
             description = R.string.viewer_volume,
-            modifier = Modifier.align(Alignment.Center),
+            modifier = Modifier.align(Alignment.CenterEnd).levelReadoutPadding(),
         )
         LevelReadout(
             level = { brightness },
             icon = { ViewerIcons.Brightness },
             description = R.string.viewer_brightness,
-            modifier = Modifier.align(Alignment.Center),
+            modifier = Modifier.align(Alignment.CenterStart).levelReadoutPadding(),
         )
     }
 }
@@ -586,32 +594,45 @@ private fun SkipBubble(feedback: SkipFeedback, modifier: Modifier = Modifier) {
     }
 }
 
+/** Clear of the navigation bar and camera cutout, which sit at the sides in landscape. */
+@OptIn(ExperimentalLayoutApi::class)
+private fun Modifier.levelReadoutPadding(): Modifier = this
+    .windowInsetsPadding(
+        WindowInsets.systemBarsIgnoringVisibility
+            .union(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+    )
+    .padding(horizontal = 24.dp)
+
+/** An upright bar that fills from the bottom, with its icon underneath. */
 @Composable
 private fun LevelIndicator(fraction: Float, icon: (Float) -> ImageVector, @StringRes description: Int) {
     Pill {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(vertical = 6.dp),
         ) {
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .height(140.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.3f)),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(fraction)
+                        .background(Color.White),
+                )
+            }
             Icon(
                 imageVector = icon(fraction),
                 contentDescription = stringResource(description),
                 tint = Color.White,
             )
-            Box(
-                Modifier
-                    .width(120.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.3f)),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(fraction)
-                        .background(Color.White),
-                )
-            }
         }
     }
 }
