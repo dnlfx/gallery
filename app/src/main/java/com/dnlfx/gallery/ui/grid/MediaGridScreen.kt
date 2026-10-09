@@ -45,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,6 +91,11 @@ fun MediaGridScreen(
     gridState: LazyGridState = rememberLazyGridState(),
 ) {
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    // The overlap changes on every frame of a scroll; only crossing the threshold matters, so the
+    // bar recomposes once when the grid slides under it rather than on every frame.
+    val scrolledUnder by remember(scrollBehavior) {
+        derivedStateOf { scrollBehavior.state.overlappedFraction > 0.01f }
+    }
     val resources = LocalContext.current.resources
     val scope = rememberCoroutineScope()
     Scaffold(
@@ -101,7 +107,7 @@ fun MediaGridScreen(
             // The chips sit under the app bar and share its colour, which deepens once the grid
             // scrolls beneath it.
             val barColor by animateColorAsState(
-                targetValue = if (scrollBehavior.state.overlappedFraction > 0.01f) {
+                targetValue = if (scrolledUnder) {
                     MaterialTheme.colorScheme.surfaceContainer
                 } else {
                     MaterialTheme.colorScheme.surface
@@ -323,7 +329,6 @@ private fun MonthHeader(label: String) {
 @Composable
 private fun MediaCell(item: MediaItem, onClick: () -> Unit) {
     val context = LocalContext.current
-    val description = remember(item) { mediaDescription(context, item) }
     val request = remember(item.uri, item.dateModifiedSeconds) {
         ImageRequest.Builder(context)
             .data(MediaThumbnail(item.uri, item.dateModifiedSeconds))
@@ -336,7 +341,9 @@ private fun MediaCell(item: MediaItem, onClick: () -> Unit) {
             .aspectRatio(1f)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
-            .semantics { contentDescription = description },
+            // Worked out only when something reads it, such as TalkBack, not for every cell a
+            // fling passes.
+            .semantics { contentDescription = mediaDescription(context, item) },
     ) {
         AsyncImage(
             model = request,

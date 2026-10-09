@@ -15,12 +15,18 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 
 sealed interface GridState {
     data object Loading : GridState
-    data class Loaded(
+
+    /**
+     * A plain class, not a data class: comparing two states field by field would walk the whole
+     * library on the main thread every time a new one arrives, and a new one always differs.
+     */
+    class Loaded(
         /** What the grid shows: the library narrowed by [filter]. */
         val items: List<MediaItem>,
         val sections: GridSections = GridSections.Empty,
@@ -49,11 +55,10 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
             if (level == MediaAccess.NONE) {
                 flowOf(GridState.Loaded(emptyList()))
             } else {
-                combine<List<MediaItem>, MediaFilter, MediaSort, GridState>(
-                    repository.observeMedia(),
-                    filter,
-                    sort,
-                ) { items, selected, order ->
+                // Worked out once per library read, not again on every filter or sort change.
+                val library = repository.observeMedia().map { items -> Library(items, nonEmptyFilters(items)) }
+                combine<Library, MediaFilter, MediaSort, GridState>(library, filter, sort) { lib, selected, order ->
+                    val items = lib.items
                     val filtered = if (selected == MediaFilter.ALL) items else items.filter(selected::matches)
                     val shown = order.sorted(filtered)
                     GridState.Loaded(
@@ -67,11 +72,13 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
                         allItems = items,
                         filter = selected,
                         sort = order,
-                        filters = availableFilters(items, selected),
+                        filters = chipFilters(lib.nonEmptyFilters, selected),
                     )
                 }
                     .flowOn(Dispatchers.Default)
-                    .onStart { emit(GridState.Loading) }
+                    // Coming back to the app reads the library again. Until it's in, keep showing
+                    // the last one rather than a spinner, so an open viewer and its video stay put.
+                    .onStart { if ((state.value as? GridState.Loaded)?.access != level) emit(GridState.Loading) }
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GridState.Loading)
@@ -89,3 +96,6 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
         MediaSort.save(getApplication(), selected)
     }
 }
+
+/** One read of the library, with the filters that have anything in it. */
+private class Library(val items: List<MediaItem>, val nonEmptyFilters: Set<MediaFilter>)

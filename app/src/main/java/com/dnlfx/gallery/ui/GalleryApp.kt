@@ -103,6 +103,8 @@ fun GalleryApp(
     val limitedAccess = access == MediaAccess.PARTIAL
     val openItemId = viewerItemId
     val viewerOpen = openItemId != null && items != null
+    // The same instance every time, so swiping in the viewer doesn't recompose the grid beneath.
+    val hiddenFromScreenReaders = remember { Modifier.clearAndSetSemantics {} }
     Box(Modifier.fillMaxSize()) {
         // The grid stays underneath the viewer, so pulling a photo down reveals it.
         MediaGridScreen(
@@ -113,7 +115,7 @@ fun GalleryApp(
             onFilterSelected = viewModel::onFilterSelected,
             onSortSelected = viewModel::onSortSelected,
             gridState = gridState,
-            modifier = if (viewerOpen) Modifier.clearAndSetSemantics {} else Modifier,
+            modifier = if (viewerOpen) hiddenFromScreenReaders else Modifier,
         )
         if (openItemId != null && items != null) {
             ViewerScreen(

@@ -41,11 +41,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import coil3.BitmapImage
 import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.size.Dimension
 import coil3.size.Precision
 import com.dnlfx.gallery.data.MediaItem
-import com.dnlfx.gallery.thumbnail.MediaThumbnail
+import com.dnlfx.gallery.thumbnail.viewerThumbnailRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.awaitCancellation
@@ -178,8 +179,13 @@ fun ZoomableImage(
                     Dimension.Pixels(min(MAX_DECODE_PX, (container.height * 2).toInt().coerceAtLeast(1))),
                 )
                 .precision(Precision.INEXACT)
+                // Each of these is tens of megabytes; a few would push every grid thumbnail out of
+                // the memory cache, and the grid would reload them all on the way back. The pages
+                // either side stay loaded anyway, and the thumbnail covers a re-decode.
+                .memoryCachePolicy(CachePolicy.DISABLED)
                 .build()
         }
+        val thumbnailRequest = remember(item.uri, item.dateModifiedSeconds) { viewerThumbnailRequest(context, item) }
 
         Box(
             modifier = Modifier
@@ -289,7 +295,7 @@ fun ZoomableImage(
         ) {
             if (!fullLoaded) {
                 AsyncImage(
-                    model = MediaThumbnail(item.uri, item.dateModifiedSeconds),
+                    model = thumbnailRequest,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),

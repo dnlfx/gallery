@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -36,12 +37,15 @@ class MediaRepository(context: Context) {
     /**
      * Emits the full library now and again whenever MediaStore reports a change. A burst of
      * changes (a camera burst, a folder copied in) re-reads the library once, not once per file.
+     * MediaStore also reports changes to files that aren't photos or videos (a download, a
+     * document saved); those re-read an identical library, which goes no further.
      */
     @OptIn(FlowPreview::class)
     fun observeMedia(): Flow<List<MediaItem>> =
         merge(flowOf(Unit), mediaStoreChanges().debounce(CHANGE_DEBOUNCE_MILLIS))
             .conflate()
             .map { queryAll() }
+            .distinctUntilChanged()
             .flowOn(Dispatchers.IO)
 
     private fun mediaStoreChanges(): Flow<Unit> = callbackFlow {
