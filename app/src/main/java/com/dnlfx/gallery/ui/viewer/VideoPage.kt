@@ -193,13 +193,13 @@ fun VideoPage(
                     customActions = listOf(
                         CustomAccessibilityAction(skipBackLabel) {
                             interacted()
-                            skip = skipBy(player, skip, forward = false)
+                            skip = skipBy(player, scrubber, skip, forward = false)
                             skipToken++
                             true
                         },
                         CustomAccessibilityAction(skipForwardLabel) {
                             interacted()
-                            skip = skipBy(player, skip, forward = true)
+                            skip = skipBy(player, scrubber, skip, forward = true)
                             skipToken++
                             true
                         },
@@ -365,12 +365,12 @@ fun VideoPage(
                                 }
                                 TapResult.SKIP_BACK -> {
                                     interacted()
-                                    skip = skipBy(player, skip, forward = false)
+                                    skip = skipBy(player, scrubber, skip, forward = false)
                                     skipToken++
                                 }
                                 TapResult.SKIP_FORWARD -> {
                                     interacted()
-                                    skip = skipBy(player, skip, forward = true)
+                                    skip = skipBy(player, scrubber, skip, forward = true)
                                     skipToken++
                                 }
                                 TapResult.TOGGLE_PLAY -> {
@@ -446,10 +446,10 @@ fun VideoPage(
 }
 
 /** Seeks 10 seconds, adding to the bubble already on screen when the user taps repeatedly. */
-private fun skipBy(player: Player, previous: SkipFeedback?, forward: Boolean): SkipFeedback {
+private fun skipBy(player: Player, scrubber: Scrubber, previous: SkipFeedback?, forward: Boolean): SkipFeedback {
     val duration = player.duration.takeIf { it > 0 } ?: 0L
     val step = if (forward) SKIP_MILLIS else -SKIP_MILLIS
-    player.seekTo(clampPosition(player.currentPosition + step, duration))
+    scrubber.jumpTo(clampPosition(player.currentPosition + step, duration))
     val seconds = if (previous != null && previous.forward == forward) previous.seconds + 10 else 10
     return SkipFeedback(forward, seconds)
 }

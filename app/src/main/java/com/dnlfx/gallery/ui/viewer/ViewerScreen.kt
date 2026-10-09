@@ -322,8 +322,8 @@ fun ViewerScreen(
                     },
                     onSeek = {
                         val target = clampPosition(it, playback.durationMillis)
-                        // A drag along the bar previews like a sideways slide; a tap jumps exactly.
-                        if (scrubber.active) scrubber.moveTo(target) else player.seekTo(target)
+                        // A drag along the bar previews like a scrub; a tap jumps straight there.
+                        scrubber.jumpTo(target)
                     },
                     onSeekStart = {
                         draggingSeekBar = true

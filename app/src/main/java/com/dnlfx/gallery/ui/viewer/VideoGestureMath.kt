@@ -116,6 +116,14 @@ fun scrubSeekPosition(positionMillis: Long, durationMillis: Long): Long =
     }
 
 /**
+ * Whether a frame about to be shown at [framePositionUs] is the one a seek to [targetUs] was
+ * after. An exact seek shows the first frame at or just past the target, so anything within a
+ * few frames of it counts.
+ */
+fun seekLanded(framePositionUs: Long, targetUs: Long): Boolean =
+    framePositionUs >= targetUs - SEEK_LANDED_BEFORE_US && framePositionUs <= targetUs + SEEK_LANDED_AFTER_US
+
+/**
  * New volume as a 0..1 fraction after an upward slide of [dragUp] pixels; sliding the full
  * [height] of the screen goes from silent to full.
  */
@@ -130,3 +138,5 @@ private const val SLOW_SLIDE_DP_PER_SECOND = 400f
 private const val FAST_SLIDE_DP_PER_SECOND = 2_500f
 private const val MAX_SCRUB_GAIN = 3f
 private const val SCRUB_END_MARGIN_MILLIS = 50L
+private const val SEEK_LANDED_BEFORE_US = 1_000L
+private const val SEEK_LANDED_AFTER_US = 250_000L

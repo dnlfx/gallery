@@ -1,6 +1,8 @@
 package com.dnlfx.gallery.ui.viewer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VideoGestureMathTest {
@@ -90,6 +92,16 @@ class VideoGestureMathTest {
         assertEquals(29_950L, scrubSeekPosition(30_000, 30_000))
         // Unknown length: nothing to stop short of.
         assertEquals(30_000L, scrubSeekPosition(30_000, -1))
+    }
+
+    @Test
+    fun aJumpLandsOnTheFirstFrameAtOrJustPastItsTarget() {
+        assertTrue(seekLanded(framePositionUs = 5_000_000, targetUs = 5_000_000))
+        // The next frame of a 30fps video.
+        assertTrue(seekLanded(framePositionUs = 5_033_333, targetUs = 5_000_000))
+        // Frames still showing from before a jump forward or back don't count.
+        assertFalse(seekLanded(framePositionUs = 2_000_000, targetUs = 5_000_000))
+        assertFalse(seekLanded(framePositionUs = 9_000_000, targetUs = 5_000_000))
     }
 
     @Test
