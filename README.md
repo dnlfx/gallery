@@ -65,8 +65,9 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
   zoom photos, swipe a photo down to close, Media3 video playback. The top bar has a favorite
   button and a trash button (Android 11+), which moves the item to the system trash after the
   system's own confirmation, recoverable for 30 days. Its menu has Edit, which opens the built-in editor
-  (there's no handing items to other apps' editors), and details (dates, folder, resolution,
-  size).
+  (there's no handing items to other apps' editors), details (dates, folder, resolution,
+  size), and Rotate screen. Ultra HDR photos, which Pixel cameras save, show with their full
+  brightness on Android 14 and later, as in Photos.
 - `ui/editor/` The built-in editor, opened with Edit in the viewer's menu: crop for photos, crop
   and trim for videos (see below).
 
@@ -145,5 +146,5 @@ can only hand it content links, never file paths.
 - Loop button in the bottom bar: when it's on, every video plays again from the start when it
   finishes. The choice is saved, so it stays on until you turn it off.
 - With controls hidden, progress is a 2dp line along the bottom edge.
-- The rotate button in the top bar flips between portrait and landscape; otherwise the
+- Rotate screen in the top bar's menu flips between portrait and landscape; otherwise the
   viewer follows the phone's auto-rotate setting.
