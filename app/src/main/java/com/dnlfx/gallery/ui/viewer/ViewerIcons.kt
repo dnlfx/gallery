@@ -13,6 +13,12 @@ import androidx.compose.ui.unit.dp
 internal object ViewerIcons {
     val Pause: ImageVector = icon("Pause", "M6,19h4V5H6v14zM14,5v14h4V5h-4z")
 
+    val Brightness: ImageVector = icon(
+        "Brightness",
+        "M20,15.31L23.31,12 20,8.69V4h-4.69L12,0.69 8.69,4H4v4.69L0.69,12 4,15.31V20h4.69L12,23.31 " +
+            "15.31,20H20v-4.69zM12,18V6c3.31,0 6,2.69 6,6s-2.69,6 -6,6z",
+    )
+
     val Repeat: ImageVector = icon("Repeat", "M7,7h10v3l4,-4 -4,-4v3L5,6v6h2L7,7zM17,17L7,17v-3l-4,4 4,4v-3h12v-6h-2v4z")
 
     val PhotoCamera: ImageVector = icon(

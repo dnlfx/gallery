@@ -138,10 +138,17 @@ class VideoGestureMathTest {
     }
 
     @Test
-    fun volumeFollowsVerticalSlides() {
-        assertEquals(0.75f, volumeAfterDrag(0.5f, 500f, 2000f), 0.0001f)
-        assertEquals(1f, volumeAfterDrag(0.5f, 5000f, 2000f), 0.0001f)
-        assertEquals(0f, volumeAfterDrag(0.5f, -5000f, 2000f), 0.0001f)
+    fun upAndDownSlidesDependOnWhichThirdTheyStartIn() {
+        assertEquals(VerticalSlide.BRIGHTNESS, verticalSlide(tapZone(100f, 1080f)))
+        assertEquals(VerticalSlide.CLOSE, verticalSlide(tapZone(540f, 1080f)))
+        assertEquals(VerticalSlide.VOLUME, verticalSlide(tapZone(1000f, 1080f)))
+    }
+
+    @Test
+    fun volumeAndBrightnessFollowVerticalSlides() {
+        assertEquals(0.75f, levelAfterDrag(0.5f, 500f, 2000f), 0.0001f)
+        assertEquals(1f, levelAfterDrag(0.5f, 5000f, 2000f), 0.0001f)
+        assertEquals(0f, levelAfterDrag(0.5f, -5000f, 2000f), 0.0001f)
     }
 
     @Test
