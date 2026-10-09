@@ -2,6 +2,7 @@ package com.dnlfx.gallery.ui.grid
 
 import android.content.Context
 import android.text.format.DateFormat
+import android.text.format.Formatter
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -27,9 +28,16 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -38,8 +46,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -51,6 +61,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -74,6 +85,7 @@ fun MediaGridScreen(
     onRequestFullAccess: () -> Unit,
     onItemClick: (index: Int, item: MediaItem) -> Unit,
     onFilterSelected: (MediaFilter) -> Unit,
+    onSortSelected: (MediaSort) -> Unit,
     modifier: Modifier = Modifier,
     gridState: LazyGridState = rememberLazyGridState(),
 ) {
@@ -116,6 +128,17 @@ fun MediaGridScreen(
                             }
                         }
                     },
+                    actions = {
+                        if (state is GridState.Loaded && state.allItems.isNotEmpty()) {
+                            SortMenu(
+                                sort = state.sort,
+                                onSelect = { sort ->
+                                    scope.launch { gridState.scrollToItem(0) }
+                                    onSortSelected(sort)
+                                },
+                            )
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = barColor,
                         scrolledContainerColor = barColor,
@@ -152,6 +175,8 @@ fun MediaGridScreen(
                 val media = state.items
                 val entries = state.sections.entries
                 val bannerCount = if (limitedAccess) 1 else 0
+                val sort = state.sort
+                val context = LocalContext.current
                 val monthFormat = remember {
                     val locale = Locale.getDefault()
                     SimpleDateFormat(DateFormat.getBestDateTimePattern(locale, "MMMMyyyy"), locale)
@@ -199,12 +224,18 @@ fun MediaGridScreen(
                     FastScroller(
                         gridState = gridState,
                         labelFor = { index ->
-                            val millis = when (val entry = entries.getOrNull(index - bannerCount)) {
-                                is GridEntry.Header -> entry.millis
-                                is GridEntry.Media -> media.getOrNull(entry.mediaIndex)?.let { it.dateModifiedSeconds * 1000 }
+                            when (val entry = entries.getOrNull(index - bannerCount)) {
+                                is GridEntry.Header -> monthFormat.format(Date(entry.millis))
+                                is GridEntry.Media -> media.getOrNull(entry.mediaIndex)?.let { item ->
+                                    when (sort.field) {
+                                        SortField.MODIFIED, SortField.TAKEN ->
+                                            monthFormat.format(Date(sort.monthSeconds(item) * 1000))
+                                        SortField.NAME -> item.displayName?.firstOrNull()?.uppercase()
+                                        SortField.SIZE -> Formatter.formatShortFileSize(context, item.sizeBytes)
+                                    }
+                                }
                                 null -> null
                             }
-                            millis?.let { monthFormat.format(Date(it)) }
                         },
                         contentPadding = padding,
                     )
@@ -212,6 +243,45 @@ fun MediaGridScreen(
             }
         }
     }
+}
+
+/** The sort button in the app bar and its menu: what to sort by, then which way round. */
+@Composable
+private fun SortMenu(sort: MediaSort, onSelect: (MediaSort) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(GridIcons.Sort, contentDescription = stringResource(R.string.sort_button))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            SortField.entries.forEach { field ->
+                SortMenuItem(
+                    label = stringResource(field.label),
+                    checked = field == sort.field,
+                    // A new field starts in its usual order: newest, A to Z, or largest first.
+                    onClick = { open = false; onSelect(MediaSort(field)) },
+                )
+            }
+            HorizontalDivider()
+            listOf(false to sort.field.naturalOrder, true to sort.field.reversedOrder).forEach { (reversed, label) ->
+                SortMenuItem(
+                    label = stringResource(label),
+                    checked = sort.reversed == reversed,
+                    onClick = { open = false; onSelect(sort.copy(reversed = reversed)) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SortMenuItem(label: String, checked: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        onClick = onClick,
+        trailingIcon = { if (checked) Icon(Icons.Filled.Check, contentDescription = null) },
+        modifier = Modifier.semantics { selected = checked },
+    )
 }
 
 /** One chip per filter, scrolling sideways. All is first and starts selected. */

@@ -29,6 +29,7 @@ sealed interface GridState {
         /** The whole library, whatever the filter. */
         val allItems: List<MediaItem> = items,
         val filter: MediaFilter = MediaFilter.ALL,
+        val sort: MediaSort = MediaSort.Default,
         /** The filters worth offering: All, the selected one, and any with at least one item. */
         val filters: List<MediaFilter> = listOf(MediaFilter.ALL),
     ) : GridState
@@ -39,6 +40,7 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MediaRepository(application)
     private val access = MutableStateFlow(MediaAccess.NONE)
     private val filter = MutableStateFlow(MediaFilter.ALL)
+    private val sort = MutableStateFlow(MediaSort.load(application))
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val state: StateFlow<GridState> = access
@@ -47,14 +49,24 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
             if (level == MediaAccess.NONE) {
                 flowOf(GridState.Loaded(emptyList()))
             } else {
-                combine<List<MediaItem>, MediaFilter, GridState>(repository.observeMedia(), filter) { items, selected ->
-                    val shown = if (selected == MediaFilter.ALL) items else items.filter(selected::matches)
+                combine<List<MediaItem>, MediaFilter, MediaSort, GridState>(
+                    repository.observeMedia(),
+                    filter,
+                    sort,
+                ) { items, selected, order ->
+                    val filtered = if (selected == MediaFilter.ALL) items else items.filter(selected::matches)
+                    val shown = order.sorted(filtered)
                     GridState.Loaded(
                         items = shown,
-                        sections = buildGridSections(shown.map { it.dateModifiedSeconds }),
+                        sections = if (order.field.hasMonths) {
+                            buildGridSections(shown.map(order::monthSeconds))
+                        } else {
+                            flatGridSections(shown.size)
+                        },
                         access = level,
                         allItems = items,
                         filter = selected,
+                        sort = order,
                         filters = availableFilters(items, selected),
                     )
                 }
@@ -70,5 +82,10 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onFilterSelected(selected: MediaFilter) {
         filter.value = selected
+    }
+
+    fun onSortSelected(selected: MediaSort) {
+        sort.value = selected
+        MediaSort.save(getApplication(), selected)
     }
 }

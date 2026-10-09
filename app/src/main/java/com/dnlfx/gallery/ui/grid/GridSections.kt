@@ -43,3 +43,7 @@ fun buildGridSections(modifiedSeconds: List<Long>, zone: TimeZone = TimeZone.get
     }
     return GridSections(entries, mediaToEntry)
 }
+
+/** The items in order with no month headers, for sorts that aren't by date. */
+fun flatGridSections(count: Int): GridSections =
+    GridSections(List(count) { GridEntry.Media(it) }, IntArray(count) { it })

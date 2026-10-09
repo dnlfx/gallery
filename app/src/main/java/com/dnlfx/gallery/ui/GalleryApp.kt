@@ -111,6 +111,7 @@ fun GalleryApp(
             onRequestFullAccess = { launcher.launch(MediaPermissions.requested) },
             onItemClick = { _, item -> viewerItemId = item.id },
             onFilterSelected = viewModel::onFilterSelected,
+            onSortSelected = viewModel::onSortSelected,
             gridState = gridState,
             modifier = if (viewerOpen) Modifier.clearAndSetSemantics {} else Modifier,
         )
