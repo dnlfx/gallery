@@ -64,9 +64,11 @@ Until the secrets exist, CI signs with a throwaway key and publishes nothing.
 - `ui/viewer/` Full-screen viewer: swipe between items in grid order, pinch or double-tap to
   zoom photos, swipe a photo down to close, Media3 video playback. The top bar has a favorite
   button and a trash button (Android 11+), which moves the item to the system trash after the
-  system's own confirmation, recoverable for 30 days. Its menu has Edit in…, which hands the item
-  to an editor such as Photos or Snapseed (edits come back as a new copy), and details (dates,
-  folder, resolution, size).
+  system's own confirmation, recoverable for 30 days. Its menu has Edit, which opens the built-in editor
+  (there's no handing items to other apps' editors), and details (dates, folder, resolution,
+  size).
+- `ui/editor/` The built-in editor, opened with Edit in the viewer's menu: crop for photos, crop
+  and trim for videos (see below).
 
 Other apps (Files, Messages, the camera) can open a photo or video in Gallery. One that's in the
 library opens among its neighbours; anything else opens on its own, without needing the photos
@@ -81,6 +83,36 @@ permission.
 - Video: anything Media3 and the phone's decoders handle, including MP4, MKV, WebM and 3GP with
   H.264, HEVC, VP9 and AV1. A video the phone can't decode shows a message instead of a black
   screen.
+
+## Editing
+
+Edit in the viewer's menu opens the built-in editor, which runs entirely on the phone. Animated
+GIFs aren't offered it. Its tabs are Crop and Adjust, plus Trim for videos. Undo steps back one
+change at a time, Reset goes back to the start, and holding the compare button shows the original.
+
+- Saving an edited photo replaces the original, after the system asks for permission (Android 11
+  and later). It's rendered from the original at full resolution and saved at the best quality
+  the format allows: PNG and WebP losslessly, JPEG at quality 100. A crop alone is cut pixel for
+  pixel. The date taken, camera details and location carry over. Formats the phone can't write
+  back (HEIC, AVIF, RAW), files other apps handed over, and Android 10 get a new copy instead.
+- An edited video is always saved as a new copy next to the original, and the viewer moves to it.
+  Copies go in Pictures/Gallery or Movies/Gallery where the original's folder can't take them.
+- Crop: a box starts around the whole photo or video. Drag a corner or edge to resize it, or drag
+  inside to move it. It can be free or locked to Original, Square, 4:3 or 16:9, turned upright
+  or on its side.
+- Rotate turns the picture 90° clockwise; the two Flip buttons mirror it left to right and top
+  to bottom. Straighten tilts it up to 45° either way and zooms in just enough that no empty
+  corners show.
+- Auto fit: finds the picture inside black bars and flat app chrome (status bar, navigation bar,
+  toolbars) and sets the box to it, ready to adjust. For videos it checks several frames, so a
+  dark scene doesn't throw it off. It's a best guess and leaves edges alone when unsure, such as
+  a clear sky at the top of a photo.
+- Adjust: brightness, contrast, saturation and warmth.
+- Trim (videos): drag the handles at each end of the frame strip to choose the part to keep; the
+  video shows the frame under the handle and plays the kept part on a loop. The speaker button
+  next to it mutes the saved copy. A trim alone copies the video as it is apart from its first
+  moments, so it's quick and keeps the original quality; any change to the picture re-encodes it
+  on the phone's hardware encoder (Media3 Transformer).
 
 ## Privacy
 

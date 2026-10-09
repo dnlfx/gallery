@@ -66,6 +66,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
     implementation(libs.media3.exoplayer)
+    // On-device trimming and cropping for the editor.
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.effect)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
