@@ -55,6 +55,7 @@
     <string name="details_length">Length</string>
     <string name="details_size">Size</string>
     <string name="viewer_open_failed">This file can\'t be opened</string>
+    <string name="viewer_loop">Loop video</string>
     <string name="viewer_seek_bar">Playback position</string>
     <string name="viewer_seek_position">%1$s of %2$s</string>
     <string name="viewer_a11y_skip_back">Back 10 seconds</string>

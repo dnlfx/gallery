@@ -105,6 +105,8 @@ backups are turned off.
   start and end.
 - Slide up or down to change the volume.
 - Speed button in the bottom bar: 0.25x to 3x. The speed stays set for the next video.
+- Loop button in the bottom bar: when it's on, every video plays again from the start when it
+  finishes. The choice is saved, so it stays on until you turn it off.
 - With controls hidden, progress is a 2dp line along the bottom edge.
 - The rotate button in the top bar flips between portrait and landscape; otherwise the
   viewer follows the phone's auto-rotate setting.
