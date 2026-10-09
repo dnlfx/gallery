@@ -18,6 +18,17 @@
     <string name="filter_screen_recordings">Screen recordings</string>
     <string name="filter_downloads">Downloads</string>
     <string name="filter_favorites">Favorites</string>
+    <string name="sort_button">Sort</string>
+    <string name="sort_modified">Date modified</string>
+    <string name="sort_taken">Date taken</string>
+    <string name="sort_name">Name</string>
+    <string name="sort_size">Size</string>
+    <string name="sort_newest_first">Newest first</string>
+    <string name="sort_oldest_first">Oldest first</string>
+    <string name="sort_a_to_z">A to Z</string>
+    <string name="sort_z_to_a">Z to A</string>
+    <string name="sort_largest_first">Largest first</string>
+    <string name="sort_smallest_first">Smallest first</string>
     <plurals name="item_count">
         <item quantity="one">%1$s item</item>
         <item quantity="other">%1$s items</item>

@@ -45,4 +45,11 @@ class GridSectionsTest {
     fun emptyLibrary() {
         assertEquals(0, buildGridSections(emptyList(), utc).entries.size)
     }
+
+    @Test
+    fun flatSectionsHaveNoHeaders() {
+        val sections = flatGridSections(3)
+        assertEquals(listOf(GridEntry.Media(0), GridEntry.Media(1), GridEntry.Media(2)), sections.entries)
+        assertEquals(2, sections.entryIndexOf(2))
+    }
 }
