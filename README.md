@@ -139,9 +139,9 @@ can only hand it content links, never file paths.
 - With TalkBack, the video offers actions to skip back or forward 10 seconds and to change the
   volume, and the seek bar can be adjusted like a slider.
 - Swipe sideways to move to the previous or next item, the same as on photos.
-- Press and hold anywhere on the video until you feel a buzz, then slide sideways to scrub
-  through it. Slow slides move precisely; quick ones cover more ground. You feel a tick at the
-  start and end.
+- Press and hold anywhere on the video until you feel a buzz to play it at 2x speed; letting go
+  goes back to the speed it had. Keep holding and slide sideways instead to scrub through it.
+  Slow slides move precisely; quick ones cover more ground. You feel a tick at the start and end.
 - Slide up or down on the left third of the video to change the brightness (only while the
   viewer is open; the phone's own setting is untouched), or on the right third to change the
   volume.

@@ -7,6 +7,7 @@ import android.view.SurfaceView
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -20,16 +21,23 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -106,7 +114,8 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
  * - double-tap the left third to go back 10 seconds, the right third to go forward 10 seconds,
  *   and keep tapping that side to add 10 more each time; double-tap the middle to play or pause;
  * - swipe sideways to move to the previous or next item, like on a photo;
- * - press and hold for a moment, then slide sideways, to scrub through the video;
+ * - press and hold for a moment to play at double speed until the finger lifts, or hold and then
+ *   slide sideways to scrub through the video;
  * - slide up or down on the left third to change the brightness, or on the right third to change
  *   the volume; pull down in the middle to close the video, like a photo;
  * - pinch to zoom; while zoomed in, one finger moves the picture instead of scrubbing.
@@ -139,6 +148,7 @@ fun VideoPage(
     var skip by remember { mutableStateOf<SkipFeedback?>(null) }
     var skipToken by remember { mutableIntStateOf(0) }
     var scrub by remember { mutableStateOf<ScrubFeedback?>(null) }
+    var fastForwarding by remember { mutableStateOf(false) }
     var volume by remember { mutableStateOf<Float?>(null) }
     var volumeToken by remember { mutableIntStateOf(0) }
     val window = remember { context.findActivity()?.window }
@@ -180,10 +190,31 @@ fun VideoPage(
         playFeedback = null
     }
 
+    // The page is on screen a moment before the player is handed this video. Until then the
+    // player still holds the last one, and would draw its frames into this page's surface.
+    val playerOnThisVideo = playback.itemId == item.id
+    var surfaceView by remember { mutableStateOf<SurfaceView?>(null) }
+    DisposableEffect(surfaceView, playerOnThisVideo) {
+        val view = surfaceView
+        if (view == null || !playerOnThisVideo) return@DisposableEffect onDispose {}
+        player.setVideoSurfaceView(view)
+        onDispose { player.clearVideoSurfaceView(view) }
+    }
+    // The thumbnail covers the surface, which stays black until the first frame. It then fades
+    // away rather than vanishing, so the switch from thumbnail to video doesn't flicker: the
+    // thumbnail can be a different frame, and the video may be in HDR.
+    val frameShown = playerOnThisVideo && playback.firstFrameRendered
+    val posterAlpha = animateFloatAsState(
+        targetValue = if (frameShown) 0f else 1f,
+        animationSpec = tween(POSTER_FADE_MILLIS),
+        label = "poster",
+    )
+    val posterVisible by remember { derivedStateOf { posterAlpha.value > 0f } }
+
     // The viewer behind draws the black backdrop, which fades out as the video is pulled down.
     Box(modifier.fillMaxSize().onSizeChanged { pageHeight = it.height }) {
         AndroidView(
-            factory = { ctx -> SurfaceView(ctx).also(player::setVideoSurfaceView) },
+            factory = { ctx -> SurfaceView(ctx).also { surfaceView = it } },
             // A SurfaceView follows its view's scale and position, so zooming and pulling down to
             // close cost nothing extra. It shrinks a little as it's pulled, like a photo.
             update = {
@@ -202,7 +233,6 @@ fun VideoPage(
                 it.translationX = zoom.x
                 it.translationY = zoom.y + dismissOffset
             },
-            onRelease = { player.clearVideoSurfaceView(it) },
             modifier = Modifier
                 .align(Alignment.Center)
                 .onSizeChanged { videoSize = it }
@@ -214,11 +244,11 @@ fun VideoPage(
                     },
                 ),
         )
-        // The surface stays black until the first frame, so cover it with the thumbnail until then.
-        if (!playback.firstFrameRendered) {
+        if (posterVisible) {
             VideoPoster(
                 item,
                 Modifier.graphicsLayer {
+                    alpha = posterAlpha.value
                     val shrink = 1f - DISMISS_SHRINK * dismissProgress()
                     scaleX = shrink
                     scaleY = shrink
@@ -290,13 +320,30 @@ fun VideoPage(
                         var startBrightness = 0f
                         var released = false
                         var upMillis = 0L
+                        var holdTotal = Offset.Zero
+                        var speedBeforeHold = 1f
+                        var playingBeforeHold = false
                         var lastMillis = down.uptimeMillis
                         velocity.addPosition(down.uptimeMillis, down.position)
+
+                        fun startScrub() {
+                            mode = DragMode.SCRUB
+                            startPosition = player.currentPosition
+                            scrubPosition = startPosition.toFloat()
+                            scrubber.begin()
+                            scrub = ScrubFeedback(startPosition, 0L, duration)
+                        }
+
+                        fun endFastForward() {
+                            player.setPlaybackSpeed(speedBeforeHold)
+                            player.playWhenReady = playingBeforeHold
+                            fastForwarding = false
+                        }
 
                         try {
                             while (true) {
                                 // Until the finger moves, wait to see whether it's held still long
-                                // enough to start scrubbing.
+                                // enough to play fast.
                                 val event = if (mode == DragMode.NONE && !multiTouch && !zoom.zoomed) {
                                     val holdLeft = viewConfiguration.longPressTimeoutMillis - (lastMillis - down.uptimeMillis)
                                     withTimeoutOrNull(holdLeft.coerceAtLeast(0L)) { awaitPointerEvent() }
@@ -304,13 +351,22 @@ fun VideoPage(
                                     awaitPointerEvent()
                                 }
                                 if (event == null) {
-                                    mode = DragMode.SCRUB
                                     interacted()
-                                    startPosition = player.currentPosition
-                                    scrubPosition = startPosition.toFloat()
-                                    scrubber.begin()
-                                    scrub = ScrubFeedback(startPosition, 0L, duration)
                                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                    if (player.playbackState == Player.STATE_ENDED) {
+                                        // Nothing left to play fast: go straight to scrubbing.
+                                        startScrub()
+                                    } else {
+                                        // Held still: play at double speed, even if paused, until
+                                        // the finger lifts or starts to slide.
+                                        mode = DragMode.FAST_FORWARD
+                                        holdTotal = total
+                                        speedBeforeHold = player.playbackParameters.speed
+                                        playingBeforeHold = player.playWhenReady
+                                        player.setPlaybackSpeed(HOLD_SPEED)
+                                        player.playWhenReady = true
+                                        fastForwarding = true
+                                    }
                                     continue
                                 }
                                 if (event.changes.count { it.pressed } > 1) {
@@ -344,6 +400,13 @@ fun VideoPage(
                                     if (mode != DragMode.SWIPE && mode != DragMode.DISMISS) interacted()
                                 }
                                 when (mode) {
+                                    DragMode.FAST_FORWARD -> {
+                                        // Sliding after the hold scrubs, as it always has.
+                                        if ((total - holdTotal).getDistance() > viewConfiguration.touchSlop) {
+                                            endFastForward()
+                                            startScrub()
+                                        }
+                                    }
                                     DragMode.SCRUB -> {
                                         val previous = scrubPosition
                                         scrubPosition = scrubStep(
@@ -410,7 +473,9 @@ fun VideoPage(
                                 if (mode != DragMode.NONE && mode != DragMode.SWIPE) change.consume()
                             }
                         } finally {
-                            // Also runs if the gesture is cut short, so playback always resumes.
+                            // Also runs if the gesture is cut short, so playback always goes back to
+                            // normal.
+                            if (mode == DragMode.FAST_FORWARD) endFastForward()
                             if (mode == DragMode.SCRUB) {
                                 scrubber.finish()
                                 scrub = null
@@ -500,6 +565,7 @@ fun VideoPage(
                 .align(Alignment.Center)
                 .then(if (controlsVisible) Modifier.offset(y = (-88).dp) else Modifier),
         )
+        if (fastForwarding) FastForwardBadge(Modifier.align(Alignment.TopCenter))
         if (playback.failed) {
             // Below the play button, which sits in the center.
             Pill(Modifier.align(Alignment.Center).padding(top = 160.dp)) {
@@ -510,17 +576,18 @@ fun VideoPage(
                 )
             }
         }
+        // Each level shows on the side of the screen whose slide changes it.
         LevelReadout(
             level = { volume },
             icon = { if (it <= 0f) ViewerIcons.VolumeOff else ViewerIcons.VolumeUp },
             description = R.string.viewer_volume,
-            modifier = Modifier.align(Alignment.Center),
+            modifier = Modifier.align(Alignment.CenterEnd).levelReadoutPadding(),
         )
         LevelReadout(
             level = { brightness },
             icon = { ViewerIcons.Brightness },
             description = R.string.viewer_brightness,
-            modifier = Modifier.align(Alignment.Center),
+            modifier = Modifier.align(Alignment.CenterStart).levelReadoutPadding(),
         )
     }
 }
@@ -586,32 +653,68 @@ private fun SkipBubble(feedback: SkipFeedback, modifier: Modifier = Modifier) {
     }
 }
 
+/** Shows while a held finger plays the video at double speed. */
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun FastForwardBadge(modifier: Modifier = Modifier) {
+    Pill(
+        modifier
+            .windowInsetsPadding(
+                WindowInsets.systemBarsIgnoringVisibility
+                    .union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Top),
+            )
+            // Below the top bar, when it's up.
+            .padding(top = 72.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.viewer_hold_speed),
+            style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
+        )
+    }
+}
+
+/** Clear of the navigation bar and camera cutout, which sit at the sides in landscape. */
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun Modifier.levelReadoutPadding(): Modifier = this
+    .windowInsetsPadding(
+        WindowInsets.systemBarsIgnoringVisibility
+            .union(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+    )
+    .padding(horizontal = 24.dp)
+
+/** An upright bar that fills from the bottom, with its icon underneath. */
 @Composable
 private fun LevelIndicator(fraction: Float, icon: (Float) -> ImageVector, @StringRes description: Int) {
     Pill {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(vertical = 6.dp),
         ) {
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .height(140.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.3f)),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(fraction)
+                        .background(Color.White),
+                )
+            }
             Icon(
                 imageVector = icon(fraction),
                 contentDescription = stringResource(description),
                 tint = Color.White,
             )
-            Box(
-                Modifier
-                    .width(120.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.3f)),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(fraction)
-                        .background(Color.White),
-                )
-            }
         }
     }
 }
@@ -629,7 +732,7 @@ private fun Pill(modifier: Modifier = Modifier, content: @Composable () -> Unit)
     }
 }
 
-private enum class DragMode { NONE, SCRUB, VOLUME, BRIGHTNESS, DISMISS, ZOOM, PAN, SWIPE }
+private enum class DragMode { NONE, FAST_FORWARD, SCRUB, VOLUME, BRIGHTNESS, DISMISS, ZOOM, PAN, SWIPE }
 
 private fun IntSize.toZoomSize() = VideoZoom.Size(width.toFloat(), height.toFloat())
 
@@ -638,4 +741,6 @@ private data class SkipFeedback(val forward: Boolean, val seconds: Int)
 private data class ScrubFeedback(val targetMillis: Long, val deltaMillis: Long, val durationMillis: Long)
 
 private const val FEEDBACK_MILLIS = 700L
+private const val HOLD_SPEED = 2f
+private const val POSTER_FADE_MILLIS = 150
 

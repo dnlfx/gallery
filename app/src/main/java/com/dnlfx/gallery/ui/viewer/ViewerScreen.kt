@@ -174,7 +174,7 @@ fun ViewerScreen(
             player.clearMediaItems()
         } else {
             val (width, height) = uprightSize(video.width, video.height, video.orientationDegrees)
-            playback.resetForNewItem(width, height)
+            playback.resetForNewItem(video.id, width, height)
             player.setMediaItem(PlayerMediaItem.fromUri(video.uri))
             player.prepare()
             player.playWhenReady = true
@@ -199,7 +199,9 @@ fun ViewerScreen(
     }
 
     SystemBarsEffect(visible = controlsVisible)
-    HdrEffect()
+    // Only photos need it. A video page left in HDR mode makes the screen flare up as it opens;
+    // an HDR video shows in HDR either way.
+    HdrEffect(enabled = settledItem?.type == MediaType.IMAGE)
     DisposableEffect(playback.isPlaying) {
         view.keepScreenOn = playback.isPlaying
         onDispose { view.keepScreenOn = false }
@@ -536,14 +538,15 @@ private fun ViewerMoreMenu(onEdit: (() -> Unit)?, onInfo: () -> Unit, onRotate: 
 
 /**
  * Shows Ultra HDR photos (what a Pixel's camera saves) with their full brightness, like Photos,
- * while the viewer is open. Ordinary photos and the rest of the app look the same.
+ * while [enabled]. Ordinary photos and the rest of the app look the same.
  */
 @Composable
-private fun HdrEffect() {
+private fun HdrEffect(enabled: Boolean) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
     val view = LocalView.current
     val window = remember { view.context.findActivity()?.window } ?: return
-    DisposableEffect(window) {
+    DisposableEffect(window, enabled) {
+        if (!enabled) return@DisposableEffect onDispose {}
         val previous = window.colorMode
         window.colorMode = ActivityInfo.COLOR_MODE_HDR
         onDispose { window.colorMode = previous }
