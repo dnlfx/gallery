@@ -9,6 +9,15 @@
     <string name="limited_access_body">Showing only the items you selected.</string>
     <string name="limited_access_action">Allow all</string>
     <string name="empty_library">No photos or videos yet</string>
+    <string name="empty_filter">Nothing here right now</string>
+    <string name="filter_all">All</string>
+    <string name="filter_photos">Photos</string>
+    <string name="filter_videos">Videos</string>
+    <string name="filter_camera">Camera</string>
+    <string name="filter_screenshots">Screenshots</string>
+    <string name="filter_screen_recordings">Screen recordings</string>
+    <string name="filter_downloads">Downloads</string>
+    <string name="filter_favorites">Favorites</string>
     <plurals name="item_count">
         <item quantity="one">%1$s item</item>
         <item quantity="other">%1$s items</item>

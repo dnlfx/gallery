@@ -5,6 +5,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.database.ContentObserver
 import android.database.Cursor
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.BaseColumns
@@ -67,7 +68,7 @@ class MediaRepository(context: Context) {
             MediaStore.MediaColumns.ORIENTATION,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.RELATIVE_PATH,
-        )
+        ) + favoriteColumn()
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)"
         val selectionArgs = arrayOf(
             MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
@@ -93,6 +94,7 @@ class MediaRepository(context: Context) {
         val orientationCol = getColumnIndexOrThrow(MediaStore.MediaColumns.ORIENTATION)
         val sizeCol = getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
         val pathCol = getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+        val favoriteCol = favoriteColumn().firstOrNull()?.let(::getColumnIndex) ?: -1
 
         val items = ArrayList<MediaItem>(count)
         while (moveToNext()) {
@@ -112,6 +114,7 @@ class MediaRepository(context: Context) {
                 orientationDegrees = ((getInt(orientationCol) % 360) + 360) % 360,
                 sizeBytes = getLong(sizeCol),
                 relativePath = getStringOrNull(pathCol),
+                isFavorite = favoriteCol >= 0 && getInt(favoriteCol) == 1,
             )
         }
         return items
@@ -120,6 +123,10 @@ class MediaRepository(context: Context) {
     private companion object {
         const val CHANGE_DEBOUNCE_MILLIS = 300L
     }
+
+    /** The favorite flag MediaStore keeps from Android 11 on, or nothing before that. */
+    private fun favoriteColumn(): Array<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) arrayOf(MediaStore.MediaColumns.IS_FAVORITE) else emptyArray()
 
     private fun Cursor.getStringOrNull(col: Int): String? = if (isNull(col)) null else getString(col)
     private fun Cursor.getLongOrNull(col: Int): Long? = if (isNull(col)) null else getLong(col)

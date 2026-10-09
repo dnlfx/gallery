@@ -110,6 +110,7 @@ fun GalleryApp(
             limitedAccess = limitedAccess,
             onRequestFullAccess = { launcher.launch(MediaPermissions.requested) },
             onItemClick = { _, item -> viewerItemId = item.id },
+            onFilterSelected = viewModel::onFilterSelected,
             gridState = gridState,
             modifier = if (viewerOpen) Modifier.clearAndSetSemantics {} else Modifier,
         )
@@ -151,7 +152,7 @@ private fun OpenedItemViewer(uri: Uri, mimeType: String?, access: MediaAccess, s
         inLibrary = when {
             libraryId == null || access == MediaAccess.NONE -> false
             library == null -> null
-            else -> library.items.any { it.id == libraryId }
+            else -> library.allItems.any { it.id == libraryId }
         }
     }
     var standalone by remember { mutableStateOf<MediaItem?>(null) }
@@ -163,7 +164,8 @@ private fun OpenedItemViewer(uri: Uri, mimeType: String?, access: MediaAccess, s
         standaloneFailed = item == null
     }
 
-    val libraryItems = library?.items
+    // The whole library, so a filter left on from earlier doesn't narrow what can be swiped to.
+    val libraryItems = library?.allItems
     val single = standalone
     when {
         inLibrary == true && libraryId != null && libraryItems != null -> ViewerScreen(
