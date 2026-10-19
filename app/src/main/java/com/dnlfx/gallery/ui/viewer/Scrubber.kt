@@ -66,11 +66,15 @@ class Scrubber(private val player: ExoPlayer, private val playback: PlaybackStat
         player.setScrubbingModeEnabled(true)
     }
 
-    fun moveTo(positionMillis: Long) {
+    /**
+     * Shows [positionMillis] in the time and progress bar, and seeks to [seekMillis], which a
+     * frame-by-frame scrub aims a little early to land on exactly the frame it wants.
+     */
+    fun moveTo(positionMillis: Long, seekMillis: Long = positionMillis) {
         if (!active || positionMillis == targetMillis) return
         targetMillis = positionMillis
         playback.scrubTargetMillis = positionMillis
-        player.seekTo(scrubSeekPosition(positionMillis, player.duration))
+        player.seekTo(scrubSeekPosition(seekMillis, player.duration))
     }
 
     fun finish() {

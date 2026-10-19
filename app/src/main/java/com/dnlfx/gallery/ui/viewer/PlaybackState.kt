@@ -53,6 +53,10 @@ class PlaybackState {
     var firstFrameRendered by mutableStateOf(false)
         internal set
 
+    /** Frames a second, as the file's video track says, or 0 until it's been read. */
+    var frameRate = 0f
+        internal set
+
     /** The video the player has been given, or null before the first. */
     var itemId by mutableStateOf<Long?>(null)
         internal set
@@ -69,6 +73,7 @@ class PlaybackState {
     internal fun resetForNewItem(id: Long, width: Int, height: Int) {
         itemId = id
         firstFrameRendered = false
+        frameRate = 0f
         setFrame(width, height, pixelRatio = 1f)
         playerPositionMillis = 0L
         scrubTargetMillis = null
@@ -120,6 +125,8 @@ fun rememberPlaybackState(player: Player?): PlaybackState {
                     format.pixelWidthHeightRatio
                 }
                 state.setFrame(width, height, ratio)
+                // Format.NO_VALUE (-1) when the file doesn't say.
+                state.frameRate = format.frameRate.coerceAtLeast(0f)
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
