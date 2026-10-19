@@ -156,6 +156,10 @@ fun VideoPage(
     val window = remember { context.findActivity()?.window }
     var brightness by remember { mutableStateOf<Float?>(null) }
     var brightnessToken by remember { mutableIntStateOf(0) }
+    // A brightness slide is for this video only: the next item, or a photo, gets the phone's own.
+    DisposableEffect(window, item.id) {
+        onDispose { window?.resetBrightness() }
+    }
     // How far a pull down in the middle has moved the video towards closing.
     var dismissOffset by remember(item.id) { mutableFloatStateOf(0f) }
     var pageHeight by remember { mutableIntStateOf(0) }

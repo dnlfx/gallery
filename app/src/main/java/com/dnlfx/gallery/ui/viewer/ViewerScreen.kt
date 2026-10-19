@@ -208,7 +208,12 @@ fun ViewerScreen(
     }
 
     val activity = remember { context.findActivity() }
-    // A brightness slide on a video lasts only while the viewer is open.
+    // A brightness slide lasts only while its video is open: back to the phone's brightness as
+    // soon as a swipe heads for another item, and when the viewer closes.
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage != pagerState.settledPage }
+            .collect { leaving -> if (leaving) activity?.window?.resetBrightness() }
+    }
     DisposableEffect(activity) {
         onDispose { activity?.window?.resetBrightness() }
     }
