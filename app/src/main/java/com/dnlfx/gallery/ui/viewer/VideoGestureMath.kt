@@ -1,5 +1,7 @@
 package com.dnlfx.gallery.ui.viewer
 
+import kotlin.math.roundToLong
+
 /** Playback speeds offered in the speed picker, from 0.25x to 3x. */
 val PlaybackSpeeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f, 3f)
 
@@ -73,35 +75,72 @@ fun clampPosition(positionMillis: Long, durationMillis: Long): Long {
 }
 
 /**
- * Milliseconds of video that a 1dp sideways slide moves at a slow, careful pace. The whole clip
- * takes [FULL_CLIP_SLIDE_DP] of sliding, about two portrait screen widths, so short clips don't
- * race to the end; long videos cap at [MAX_SCRUB_MILLIS_PER_DP] so small nudges stay small.
+ * How long one frame lasts, in microseconds, for a video of [frameRate] frames a second. Videos
+ * that don't say (zero or less) count as 30 a second, the most common rate.
  */
-fun scrubMillisPerDp(durationMillis: Long): Float =
-    if (durationMillis <= 0L) {
-        MAX_SCRUB_MILLIS_PER_DP
-    } else {
-        (durationMillis / FULL_CLIP_SLIDE_DP).coerceAtMost(MAX_SCRUB_MILLIS_PER_DP)
-    }
+fun frameDurationUs(frameRate: Float): Long {
+    val rate = if (frameRate > 0f) frameRate else DEFAULT_FRAME_RATE
+    return (1_000_000.0 / rate).roundToLong().coerceAtLeast(1L)
+}
+
+/** The frame on screen at [positionUs]: frame 0 starts the video. */
+fun frameAt(positionUs: Long, frameUs: Long): Long = positionUs.coerceAtLeast(0L) / frameUs
 
 /**
- * Faster slides cover more ground: up to [SLOW_SLIDE_DP_PER_SECOND] a slide moves at the base
- * rate, then the multiplier climbs to [MAX_SCRUB_GAIN] at [FAST_SLIDE_DP_PER_SECOND]. Careful
- * slides stay precise while a quick flick still crosses a long video.
+ * The last frame of a video [durationMillis] long, or null if its length isn't known yet. The
+ * last frame starts at least half a frame before the end, which allows for rounding in both.
+ */
+fun lastFrame(durationMillis: Long, frameUs: Long): Long? =
+    if (durationMillis > 0L) ((durationMillis * 1_000L - frameUs / 2) / frameUs).coerceAtLeast(0L) else null
+
+/**
+ * Frames a sideways slide of [dragDp] moves at [speedDpPerSecond]. At an ordinary pace every
+ * [SCRUB_DP_PER_FRAME] dp is exactly one frame, so the picture steps through the video frame by
+ * frame; only a deliberate fast flick covers several frames per step (see [scrubGain]).
+ */
+fun scrubFrames(dragDp: Float, speedDpPerSecond: Float): Float =
+    dragDp / SCRUB_DP_PER_FRAME * scrubGain(speedDpPerSecond)
+
+/**
+ * Up to [SLOW_SLIDE_DP_PER_SECOND] a slide moves one frame per [SCRUB_DP_PER_FRAME] dp; faster,
+ * the multiplier climbs to [MAX_SCRUB_GAIN] at [FAST_SLIDE_DP_PER_SECOND], so a quick flick can
+ * still get somewhere. The frames it shows are still in order.
  */
 fun scrubGain(speedDpPerSecond: Float): Float {
     val t = (speedDpPerSecond - SLOW_SLIDE_DP_PER_SECOND) / (FAST_SLIDE_DP_PER_SECOND - SLOW_SLIDE_DP_PER_SECOND)
     return 1f + t.coerceIn(0f, 1f) * (MAX_SCRUB_GAIN - 1f)
 }
 
+/** [frame] kept inside the video: no earlier than the first frame, no later than [lastFrame]. */
+fun clampFrame(frame: Long, lastFrame: Long?): Long {
+    val atLeastZero = frame.coerceAtLeast(0L)
+    return if (lastFrame != null) atLeastZero.coerceAtMost(lastFrame) else atLeastZero
+}
+
+/** When [frame] starts, in milliseconds: what the time readout shows for it. */
+fun frameStartMillis(frame: Long, frameUs: Long): Long = (frame * frameUs + 500L) / 1_000L
+
 /**
- * Position after one step of a sideways slide: [dragDp] dp at [speedDpPerSecond], from
- * [positionMillis]. Each step is clamped, so sliding back after reaching an end responds at once.
+ * Where to seek, in milliseconds, to show exactly [frame]. An exact seek shows the first frame at
+ * or after its target, so aiming half a frame early lands on [frame] even when its timestamp is a
+ * little off the even spacing.
  */
-fun scrubStep(positionMillis: Float, dragDp: Float, speedDpPerSecond: Float, durationMillis: Long): Float {
-    val moved = positionMillis + dragDp * scrubMillisPerDp(durationMillis) * scrubGain(speedDpPerSecond)
-    val atLeastZero = moved.coerceAtLeast(0f)
-    return if (durationMillis > 0L) atLeastZero.coerceAtMost(durationMillis.toFloat()) else atLeastZero
+fun frameSeekMillis(frame: Long, frameUs: Long): Long =
+    ((frame * frameUs - frameUs / 2) / 1_000L).coerceAtLeast(0L)
+
+/** A time down to the hundredth of a second, like 0:12.36 or 1:02:03.50, for scrubbing by frame. */
+fun formatPreciseTime(millis: Long): String {
+    val clamped = millis.coerceAtLeast(0L)
+    val totalSeconds = clamped / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    val hundredths = (clamped % 1000) / 10
+    return if (hours > 0) {
+        "%d:%02d:%02d.%02d".format(hours, minutes, seconds, hundredths)
+    } else {
+        "%d:%02d.%02d".format(minutes, seconds, hundredths)
+    }
 }
 
 /**
@@ -152,11 +191,11 @@ fun levelAfterDrag(startFraction: Float, dragUp: Float, height: Float): Float {
     return (startFraction + dragUp / height).coerceIn(0f, 1f)
 }
 
-private const val FULL_CLIP_SLIDE_DP = 800f
-private const val MAX_SCRUB_MILLIS_PER_DP = 250f
-private const val SLOW_SLIDE_DP_PER_SECOND = 400f
-private const val FAST_SLIDE_DP_PER_SECOND = 2_500f
-private const val MAX_SCRUB_GAIN = 3f
+private const val DEFAULT_FRAME_RATE = 30f
+private const val SCRUB_DP_PER_FRAME = 6f
+private const val SLOW_SLIDE_DP_PER_SECOND = 1_200f
+private const val FAST_SLIDE_DP_PER_SECOND = 3_000f
+private const val MAX_SCRUB_GAIN = 4f
 private const val SCRUB_END_MARGIN_MILLIS = 50L
 private const val SEEK_LANDED_BEFORE_US = 1_000L
 private const val SEEK_LANDED_AFTER_US = 250_000L

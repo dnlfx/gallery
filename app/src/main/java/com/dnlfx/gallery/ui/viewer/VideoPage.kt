@@ -2,6 +2,7 @@ package com.dnlfx.gallery.ui.viewer
 
 import android.content.Context
 import android.media.AudioManager
+import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.SurfaceView
 import androidx.annotation.StringRes
@@ -89,6 +90,7 @@ import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.thumbnail.viewerThumbnailRequest
 import com.dnlfx.gallery.ui.findActivity
 import com.dnlfx.gallery.ui.grid.formatDuration
+import java.text.NumberFormat
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -115,7 +117,7 @@ fun VideoPoster(item: MediaItem, modifier: Modifier = Modifier) {
  *   and keep tapping that side to add 10 more each time; double-tap the middle to play or pause;
  * - swipe sideways to move to the previous or next item, like on a photo;
  * - press and hold for a moment to play at double speed until the finger lifts, or hold and then
- *   slide sideways to scrub through the video;
+ *   slide sideways to scrub through the video frame by frame;
  * - slide up or down on the left third to change the brightness, or on the right third to change
  *   the volume; pull down in the middle to close the video, like a photo;
  * - pinch to zoom; while zoomed in, one finger moves the picture instead of scrubbing.
@@ -311,8 +313,13 @@ fun VideoPage(
                         var mode = DragMode.NONE
                         var total = Offset.Zero
                         var multiTouch = false
-                        var startPosition = 0L
-                        var scrubPosition = 0f
+                        // Scrubbing counts in frames: where it started, where the finger has got
+                        // to (between frames), and the frame last asked for.
+                        var frameUs = 0L
+                        var lastFrameIndex: Long? = null
+                        var startFrame = 0L
+                        var scrubFrame = 0f
+                        var shownFrame = 0L
                         val duration = playback.durationMillis
                         val velocity = VelocityTracker()
                         val maxVolume = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -328,10 +335,13 @@ fun VideoPage(
 
                         fun startScrub() {
                             mode = DragMode.SCRUB
-                            startPosition = player.currentPosition
-                            scrubPosition = startPosition.toFloat()
+                            frameUs = frameDurationUs(playback.frameRate)
+                            lastFrameIndex = lastFrame(duration, frameUs)
+                            startFrame = clampFrame(frameAt(player.currentPosition * 1_000L, frameUs), lastFrameIndex)
+                            scrubFrame = startFrame.toFloat()
+                            shownFrame = startFrame
                             scrubber.begin()
-                            scrub = ScrubFeedback(startPosition, 0L, duration)
+                            scrub = ScrubFeedback(frameStartMillis(startFrame, frameUs), 0L, duration)
                         }
 
                         fun endFastForward() {
@@ -408,20 +418,29 @@ fun VideoPage(
                                         }
                                     }
                                     DragMode.SCRUB -> {
-                                        val previous = scrubPosition
-                                        scrubPosition = scrubStep(
-                                            positionMillis = previous,
+                                        val moved = scrubFrames(
                                             dragDp = change.positionChange().x.toDp().value,
                                             speedDpPerSecond = abs(velocity.calculateVelocity().x).toDp().value,
-                                            durationMillis = duration,
                                         )
-                                        val target = scrubPosition.roundToLong()
-                                        scrubber.moveTo(target)
-                                        scrub = ScrubFeedback(target, target - startPosition, duration)
-                                        // A tick when the slide reaches the start or the end.
-                                        val atEnd = scrubPosition <= 0f || (duration > 0L && scrubPosition >= duration)
-                                        if (atEnd && previous != scrubPosition) {
-                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        // Clamped every step, so sliding back after reaching an end
+                                        // responds at once.
+                                        scrubFrame = (scrubFrame + moved)
+                                            .coerceIn(0f, lastFrameIndex?.toFloat() ?: Float.MAX_VALUE)
+                                        val frame = clampFrame(scrubFrame.roundToLong(), lastFrameIndex)
+                                        if (frame != shownFrame) {
+                                            val singleStep = abs(frame - shownFrame) == 1L
+                                            shownFrame = frame
+                                            val target = frameStartMillis(frame, frameUs)
+                                            scrubber.moveTo(target, seekMillis = frameSeekMillis(frame, frameUs))
+                                            scrub = ScrubFeedback(target, frame - startFrame, duration)
+                                            if (frame == 0L || frame == lastFrameIndex) {
+                                                // A firmer tick at the start and the end.
+                                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                            } else if (singleStep && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                                // A faint detent for each frame stepped through; a
+                                                // flick that skips frames stays quiet.
+                                                view.performHapticFeedback(HapticFeedbackConstants.SEGMENT_FREQUENT_TICK)
+                                            }
                                         }
                                     }
                                     DragMode.VOLUME -> {
@@ -595,17 +614,21 @@ fun VideoPage(
 @Composable
 private fun ScrubReadout(feedback: () -> ScrubFeedback?, modifier: Modifier = Modifier) {
     val current = feedback() ?: return
+    val resources = LocalContext.current.resources
+    // Even-width digits, so the readout doesn't jiggle as it counts frames.
+    val tabular = "tnum"
     Pill(modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "${formatDuration(current.targetMillis)} / ${formatDuration(current.durationMillis)}",
-                style = MaterialTheme.typography.titleMedium,
+                text = "${formatPreciseTime(current.targetMillis)} / ${formatDuration(current.durationMillis)}",
+                style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = tabular),
                 color = Color.White,
             )
-            val sign = if (current.deltaMillis < 0) "-" else "+"
+            val frames = abs(current.deltaFrames)
+            val signed = (if (current.deltaFrames < 0) "−" else "+") + NumberFormat.getIntegerInstance().format(frames)
             Text(
-                text = sign + formatDuration(abs(current.deltaMillis)),
-                style = MaterialTheme.typography.labelMedium,
+                text = resources.getQuantityString(R.plurals.viewer_scrub_frames, frames.toInt(), signed),
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = tabular),
                 color = Color.White.copy(alpha = 0.8f),
             )
         }
@@ -738,7 +761,7 @@ private fun IntSize.toZoomSize() = VideoZoom.Size(width.toFloat(), height.toFloa
 
 private data class SkipFeedback(val forward: Boolean, val seconds: Int)
 
-private data class ScrubFeedback(val targetMillis: Long, val deltaMillis: Long, val durationMillis: Long)
+private data class ScrubFeedback(val targetMillis: Long, val deltaFrames: Long, val durationMillis: Long)
 
 private const val FEEDBACK_MILLIS = 700L
 private const val HOLD_SPEED = 2f

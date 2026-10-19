@@ -54,36 +54,65 @@ class VideoGestureMathTest {
     }
 
     @Test
-    fun shortClipsTakeTwoScreenWidthsToCross() {
-        // A 20 second clip at a careful pace: 400dp, about one portrait screen width, moves 10 seconds.
-        assertEquals(25f, scrubMillisPerDp(20_000), 0.001f)
-        assertEquals(15_000f, scrubStep(5_000f, 400f, 100f, 20_000), 0.5f)
+    fun framesLastAsLongAsTheFrameRateSays() {
+        assertEquals(33_333L, frameDurationUs(30f))
+        assertEquals(16_667L, frameDurationUs(60f))
+        assertEquals(41_708L, frameDurationUs(23.976f))
+        // A video that doesn't say counts as 30 frames a second.
+        assertEquals(33_333L, frameDurationUs(-1f))
     }
 
     @Test
-    fun longVideosCapTheScrubRate() {
-        // A one hour video: a careful 400dp slide moves 100 seconds, not a quarter of the hour.
-        assertEquals(250f, scrubMillisPerDp(3_600_000), 0.001f)
-        assertEquals(110_000f, scrubStep(10_000f, 400f, 100f, 3_600_000), 0.5f)
-        // Unknown length scrubs at the long-video rate.
-        assertEquals(250f, scrubMillisPerDp(0), 0.001f)
+    fun aCarefulSlideStepsOneFrameAtATime() {
+        // 6dp at an ordinary pace is one frame, and a 400dp slide is about 67 frames: two
+        // seconds of a 30fps video, not the ten seconds the old scrub moved.
+        assertEquals(1f, scrubFrames(6f, 100f), 0.0001f)
+        assertEquals(-1f, scrubFrames(-6f, 100f), 0.0001f)
+        assertEquals(66.67f, scrubFrames(400f, 800f), 0.01f)
     }
 
     @Test
-    fun fasterSlidesCoverMoreGround() {
+    fun onlyAFastFlickCoversSeveralFramesPerStep() {
         assertEquals(1f, scrubGain(0f), 0.0001f)
-        assertEquals(1f, scrubGain(400f), 0.0001f)
-        assertEquals(2f, scrubGain(1_450f), 0.0001f)
-        assertEquals(3f, scrubGain(2_500f), 0.0001f)
-        assertEquals(3f, scrubGain(10_000f), 0.0001f)
+        assertEquals(1f, scrubGain(1_200f), 0.0001f)
+        assertEquals(2.5f, scrubGain(2_100f), 0.0001f)
+        assertEquals(4f, scrubGain(3_000f), 0.0001f)
+        assertEquals(4f, scrubGain(10_000f), 0.0001f)
     }
 
     @Test
-    fun scrubStepsStayInsideTheVideo() {
-        assertEquals(0f, scrubStep(1_000f, -500f, 100f, 20_000), 0.0001f)
-        assertEquals(20_000f, scrubStep(19_000f, 500f, 100f, 20_000), 0.0001f)
-        // Sliding back from the end responds straight away instead of unwinding an overshoot.
-        assertEquals(19_750f, scrubStep(20_000f, -10f, 100f, 20_000), 0.5f)
+    fun framesStayInsideTheVideo() {
+        val frameUs = frameDurationUs(30f)
+        // A 10 second 30fps video has frames 0 to 299.
+        assertEquals(299L, lastFrame(10_000, frameUs))
+        assertEquals(null, lastFrame(0, frameUs))
+        assertEquals(0L, clampFrame(-3, 299))
+        assertEquals(299L, clampFrame(400, 299))
+        assertEquals(400L, clampFrame(400, null))
+        // The frame on screen partway through it.
+        assertEquals(30L, frameAt(1_010_000, frameUs))
+    }
+
+    @Test
+    fun eachFrameSeekLandsOnItsOwnFrame() {
+        val frameUs = frameDurationUs(30f)
+        // An exact seek shows the first frame at or after the target, so aiming half a frame
+        // early shows frame k, never the one before or after, even with slightly uneven timestamps.
+        for (frame in 1L..600L) {
+            val targetUs = frameSeekMillis(frame, frameUs) * 1_000L
+            val frameTimeUs = frame * frameUs
+            assertTrue(targetUs <= frameTimeUs - 10_000L)
+            assertTrue(targetUs > (frame - 1) * frameUs + 10_000L)
+        }
+        assertEquals(0L, frameSeekMillis(0, frameUs))
+        assertEquals(1_000L, frameStartMillis(30, frameUs))
+    }
+
+    @Test
+    fun preciseTimesShowHundredths() {
+        assertEquals("0:00.00", formatPreciseTime(0))
+        assertEquals("0:12.36", formatPreciseTime(12_369))
+        assertEquals("1:02:03.50", formatPreciseTime(3_723_500))
     }
 
     @Test

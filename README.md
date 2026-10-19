@@ -140,8 +140,11 @@ can only hand it content links, never file paths.
   volume, and the seek bar can be adjusted like a slider.
 - Swipe sideways to move to the previous or next item, the same as on photos.
 - Press and hold anywhere on the video until you feel a buzz to play it at 2x speed; letting go
-  goes back to the speed it had. Keep holding and slide sideways instead to scrub through it.
-  Slow slides move precisely; quick ones cover more ground. You feel a tick at the start and end.
+  goes back to the speed it had. Keep holding and slide sideways instead to scrub through it
+  frame by frame: every short nudge shows the next or previous frame, with a faint tick for each
+  one and a firmer tick at the start and end. The readout shows the time to the hundredth of a
+  second and how many frames you've moved. Only a fast flick skips frames; for big jumps, use the
+  seek bar.
 - Slide up or down on the left third of the video to change the brightness (only while the
   viewer is open; the phone's own setting is untouched), or on the right third to change the
   volume.
