@@ -125,8 +125,17 @@ jobs:
           # The same file name in every release keeps one download link working:
           # https://github.com/${{ github.repository }}/releases/latest/download/gallery.apk
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/gallery.apk"
-          gh release create "v$VERSION_NAME" "$RUNNER_TEMP/gallery.apk" \
+          # Only one release is listed, like live-stream-recorder: each build replaces "gallery-latest".
+          # Older numbered releases (v1.0.x) are removed too; their git tags stay.
+          gh release list --limit 1000 --json tagName --jq '.[].tagName' | while read -r tag; do
+            if [ "$tag" = "gallery-latest" ]; then
+              gh release delete gallery-latest --yes --cleanup-tag
+            else
+              gh release delete "$tag" --yes
+            fi
+          done
+          gh release create gallery-latest "$RUNNER_TEMP/gallery.apk" \
             --target "$GITHUB_SHA" \
-            --title "Gallery $VERSION_NAME" \
-            --generate-notes \
-            --latest
+            --title "Gallery $VERSION_NAME (latest)" \
+            --latest \
+            --notes "Gallery $VERSION_NAME, built from main at ${GITHUB_SHA::7}. Open this page on your phone and tap gallery.apk to install or update."

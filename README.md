@@ -8,7 +8,8 @@ Built with Kotlin, Jetpack Compose and Coil. Minimum Android 10, targets Android
 
 ## Install
 
-Every merge to `main` publishes a signed APK as a GitHub Release. The newest one is always at
+Every merge to `main` publishes a signed APK as the one GitHub Release, replacing the previous
+build. It is always at
 
 https://github.com/dnlfx/gallery/releases/latest/download/gallery.apk
 
