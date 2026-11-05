@@ -1,0 +1,5 @@
+# Ahead-of-time compile all of the app's own code on install. The app is small, so compiling it
+# all costs little space and means launch, the grid fling and the viewer never run interpreted.
+# AndroidX and Compose bring their own profiles, which are merged in with this one.
+HSPLcom/dnlfx/gallery/**->**(**)**
+Lcom/dnlfx/gallery/**;

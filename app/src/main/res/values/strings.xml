@@ -4,11 +4,13 @@
     <string name="permission_title">See all your photos and videos</string>
     <string name="permission_body">Gallery needs access to your photos and videos to show them in one place, sorted by when they were last changed.</string>
     <string name="permission_grant">Allow access</string>
+    <string name="permission_private">Everything stays on this phone. Gallery has no internet access.</string>
     <string name="permission_open_settings">Open settings</string>
     <string name="permission_denied_body">Access was denied. You can turn it on in the app\'s settings under Permissions, Photos and videos.</string>
     <string name="limited_access_body">Showing only the items you selected.</string>
     <string name="limited_access_action">Allow all</string>
     <string name="empty_library">No photos or videos yet</string>
+    <string name="empty_library_body">Photos and videos you take or save on this phone show up here.</string>
     <string name="empty_filter">Nothing here right now</string>
     <string name="filter_all">All</string>
     <string name="filter_photos">Photos</string>
@@ -75,6 +77,7 @@
     <string name="viewer_frame_failed">Couldn\'t save this frame</string>
     <string name="viewer_video_error">This phone can\'t play this video</string>
     <string name="viewer_more">More options</string>
+    <string name="viewer_actions">Photo actions</string>
     <string name="viewer_edit">Edit</string>
     <string name="editor_title">Edit</string>
     <string name="editor_cancel">Cancel</string>
