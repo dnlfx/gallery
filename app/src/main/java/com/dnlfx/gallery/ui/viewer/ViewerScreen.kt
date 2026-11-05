@@ -428,7 +428,7 @@ fun ViewerScreen(
                     .padding(bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (video != null && player != null && scrubber != null && settledItem?.id == video.id) {
+                if (video != null && player != null && scrubber != null) {
                     VideoBottomBar(
                         playback = playback,
                         speed = speed,

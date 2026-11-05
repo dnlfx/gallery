@@ -624,12 +624,12 @@ internal fun MediaCell(
     val corner = SELECTED_CORNER * selectedFraction
     val selectLabel = stringResource(R.string.cell_select)
     if (bounds != null) {
-        DisposableEffect(bounds, item.id) { onDispose { bounds.forget(item.id) } }
+        DisposableEffect(bounds, item.id) { onDispose { bounds.drop(item.id) } }
     }
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .then(if (bounds != null) Modifier.onPlaced { bounds.remember(item.id, it) } else Modifier)
+            .then(if (bounds != null) Modifier.onPlaced { bounds.place(item.id, it) } else Modifier)
             .background(
                 if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
             )
@@ -792,11 +792,11 @@ private fun LimitedAccessBanner(onRequestFullAccess: () -> Unit) {
 class CellBounds {
     private val placed = HashMap<Long, LayoutCoordinates>()
 
-    internal fun remember(id: Long, coordinates: LayoutCoordinates) {
+    internal fun place(id: Long, coordinates: LayoutCoordinates) {
         placed[id] = coordinates
     }
 
-    internal fun forget(id: Long) {
+    internal fun drop(id: Long) {
         placed.remove(id)
     }
 
