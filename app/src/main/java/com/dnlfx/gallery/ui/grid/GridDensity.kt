@@ -53,7 +53,7 @@ fun rememberGridLevel(): MutableIntState {
  * them smaller, one step of [level] at a time. A pinch stops the grid from scrolling and its cells
  * from opening.
  */
-fun Modifier.pinchToResize(level: MutableIntState): Modifier = this.then(
+fun Modifier.pinchToResize(level: MutableIntState, onStep: () -> Unit = {}): Modifier = this.then(
     Modifier.pointerInput(level) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -64,12 +64,12 @@ fun Modifier.pinchToResize(level: MutableIntState): Modifier = this.then(
                     zoom *= event.calculateZoom()
                     event.changes.forEach { it.consume() }
                     when {
-                        zoom > ZOOM_STEP -> {
-                            level.intValue = zoomedLevel(level.intValue, zoomIn = true)
-                            zoom = 1f
-                        }
-                        zoom < 1f / ZOOM_STEP -> {
-                            level.intValue = zoomedLevel(level.intValue, zoomIn = false)
+                        zoom > ZOOM_STEP || zoom < 1f / ZOOM_STEP -> {
+                            val next = zoomedLevel(level.intValue, zoomIn = zoom > 1f)
+                            if (next != level.intValue) {
+                                level.intValue = next
+                                onStep()
+                            }
                             zoom = 1f
                         }
                     }

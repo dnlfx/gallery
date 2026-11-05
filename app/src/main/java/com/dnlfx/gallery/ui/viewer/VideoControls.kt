@@ -1,6 +1,9 @@
 package com.dnlfx.gallery.ui.viewer
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.material3.ButtonDefaults
+import com.dnlfx.gallery.ui.theme.ViewerColors
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,9 +48,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -64,18 +66,25 @@ import com.dnlfx.gallery.ui.grid.formatDuration
 /** Large play or pause button in the middle of the video, shown with the other controls. */
 @Composable
 fun PlayPauseButton(playing: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    // Round while paused, a softer square while playing, morphing between the two.
+    val corner by animateDpAsState(
+        targetValue = if (playing) 28.dp else 40.dp,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "playCorner",
+    )
     FilledIconButton(
         onClick = onClick,
+        shape = RoundedCornerShape(corner),
         colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = Color.Black.copy(alpha = 0.45f),
-            contentColor = Color.White,
+            containerColor = ViewerColors.Glass,
+            contentColor = ViewerColors.OnGlass,
         ),
-        modifier = modifier.size(64.dp),
+        modifier = modifier.size(80.dp),
     ) {
         Icon(
             imageVector = if (playing) ViewerIcons.Pause else Icons.Filled.PlayArrow,
             contentDescription = stringResource(if (playing) R.string.viewer_pause else R.string.viewer_play),
-            modifier = Modifier.size(36.dp),
+            modifier = Modifier.size(40.dp),
         )
     }
 }
@@ -99,11 +108,7 @@ fun VideoBottomBar(
     modifier: Modifier = Modifier,
 ) {
     var speedPickerOpen by remember { mutableStateOf(false) }
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f)))),
-    ) {
+    Column(modifier.fillMaxWidth()) {
         AnimatedVisibility(visible = speedPickerOpen) {
             SpeedPicker(
                 selected = speed,
@@ -115,7 +120,7 @@ fun VideoBottomBar(
         }
         Row(
             // The speed button carries its own inner padding at the end.
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // The position changes many times a second while playing, so only the parts that
@@ -147,11 +152,15 @@ fun VideoBottomBar(
                     speedPickerOpen = !speedPickerOpen
                     onInteraction()
                 },
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = if (speed != 1f || speedPickerOpen) ViewerColors.Glass else Color.Transparent,
+                    contentColor = ViewerColors.OnGlass,
+                ),
             ) {
                 Text(
                     text = formatSpeed(speed),
-                    color = Color.White,
-                    fontWeight = if (speed != 1f) FontWeight.Bold else FontWeight.Normal,
+                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                    fontWeight = if (speed != 1f) FontWeight.Bold else FontWeight.Medium,
                 )
             }
         }
@@ -196,12 +205,18 @@ private fun SpeedPicker(selected: Float, onSelect: (Float) -> Unit) {
     ) {
         PlaybackSpeeds.forEach { speed ->
             val isSelected = speed == selected
+            // The chosen speed is a squarer white pill; the rest are round glass ones.
+            val corner by animateDpAsState(
+                targetValue = if (isSelected) 10.dp else 18.dp,
+                animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                label = "speedCorner",
+            )
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(if (isSelected) Color.White else Color.White.copy(alpha = 0.15f))
+                    .clip(RoundedCornerShape(corner))
+                    .background(if (isSelected) Color.White else ViewerColors.Glass)
                     .clickable { onSelect(speed) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
             ) {
                 Text(
                     text = formatSpeed(speed),
@@ -220,7 +235,12 @@ private fun PositionLabel(playback: PlaybackState) {
 
 @Composable
 private fun TimeLabel(text: String) {
-    Text(text = text, style = MaterialTheme.typography.labelMedium, color = Color.White)
+    Text(
+        text = text,
+        // Even-width digits, so the bar doesn't twitch as the seconds tick.
+        style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+        color = ViewerColors.OnGlass,
+    )
 }
 
 /** A 3dp track with a small thumb; tap or drag anywhere along it to seek. */
@@ -249,7 +269,8 @@ private fun ThinSeekBar(
 
     Canvas(
         modifier
-            .height(32.dp)
+            // A full 48 dp touch target, though the track itself is thin.
+            .height(48.dp)
             // Screen readers announce the time and can move it, by default 5% of the video per step.
             .semantics {
                 contentDescription = label
@@ -290,12 +311,40 @@ private fun ThinSeekBar(
                 )
             },
     ) {
+        // Material 3 Expressive slider: a thick active track, an upright handle with a gap on
+        // either side, and a thinner, fainter track for what's left.
         val y = size.height / 2f
-        val track = 3.dp.toPx()
-        drawLine(Color.White.copy(alpha = 0.3f), Offset(0f, y), Offset(size.width, y), track, StrokeCap.Round)
-        drawLine(Color.White, Offset(0f, y), Offset(size.width * fraction, y), track, StrokeCap.Round)
-        val thumb = if (dragFraction != null) 7.dp.toPx() else 5.dp.toPx()
-        drawCircle(Color.White, radius = thumb, center = Offset(size.width * fraction, y))
+        val dragging = dragFraction != null
+        val handleWidth = (if (dragging) 3.dp else 4.dp).toPx()
+        val handleHeight = (if (dragging) 28.dp else 22.dp).toPx()
+        val gap = 4.dp.toPx()
+        val active = 6.dp.toPx()
+        val inactive = 4.dp.toPx()
+        val x = (size.width * fraction).coerceIn(handleWidth / 2f, size.width - handleWidth / 2f)
+        val activeEnd = x - handleWidth / 2f - gap
+        val inactiveStart = x + handleWidth / 2f + gap
+        if (activeEnd > 0f) {
+            drawRoundRect(
+                Color.White,
+                topLeft = Offset(0f, y - active / 2f),
+                size = Size(activeEnd, active),
+                cornerRadius = CornerRadius(active / 2f),
+            )
+        }
+        if (inactiveStart < size.width) {
+            drawRoundRect(
+                ViewerColors.Track,
+                topLeft = Offset(inactiveStart, y - inactive / 2f),
+                size = Size(size.width - inactiveStart, inactive),
+                cornerRadius = CornerRadius(inactive / 2f),
+            )
+        }
+        drawRoundRect(
+            Color.White,
+            topLeft = Offset(x - handleWidth / 2f, y - handleHeight / 2f),
+            size = Size(handleWidth, handleHeight),
+            cornerRadius = CornerRadius(handleWidth / 2f),
+        )
     }
 }
 

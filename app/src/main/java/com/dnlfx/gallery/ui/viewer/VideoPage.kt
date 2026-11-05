@@ -86,6 +86,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
 import com.dnlfx.gallery.R
+import com.dnlfx.gallery.ui.theme.ViewerColors
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.thumbnail.viewerThumbnailRequest
 import com.dnlfx.gallery.ui.findActivity
@@ -750,9 +751,9 @@ private fun LevelIndicator(fraction: Float, icon: (Float) -> ImageVector, @Strin
 private fun Pill(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.Black.copy(alpha = 0.55f))
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .clip(RoundedCornerShape(24.dp))
+            .background(ViewerColors.Glass)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         content()

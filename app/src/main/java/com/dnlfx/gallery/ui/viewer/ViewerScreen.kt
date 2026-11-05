@@ -5,14 +5,33 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Build
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
+import androidx.activity.BackEventCompat
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import kotlin.coroutines.cancellation.CancellationException
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,20 +42,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -63,7 +69,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -81,8 +86,6 @@ import com.dnlfx.gallery.ui.findActivity
 import com.dnlfx.gallery.ui.rememberMediaRequests
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
 import androidx.media3.common.MediaItem as PlayerMediaItem
 
 private const val CONTROLS_HIDE_MILLIS = 3_000L
@@ -97,6 +100,10 @@ fun ViewerScreen(
     startItemId: Long,
     onCurrentItemChange: (Long) -> Unit,
     onClose: () -> Unit,
+    /** The grid cell the viewer opens out of, in screen coordinates; null to just appear. */
+    openFrom: Rect? = null,
+    /** Where an item's grid cell is on screen, so closing can shrink back into it. */
+    boundsOf: (Long) -> Rect? = { null },
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -112,7 +119,52 @@ fun ViewerScreen(
     var revealId by remember { mutableStateOf<Long?>(null) }
     val settledItem = items.getOrNull(pagerState.settledPage)
 
-    BackHandler(onBack = onClose)
+    // Opening grows the photo out of its grid cell; closing shrinks it back into the cell it
+    // belongs to now. 0 is the cell, 1 is the photo filling the screen.
+    val motion = MaterialTheme.motionScheme
+    val reveal = remember { Animatable(if (openFrom != null) 0f else 1f) }
+    var anchor by remember { mutableStateOf(openFrom) }
+    var anchorAspect by remember { mutableFloatStateOf(items.firstOrNull { it.id == startItemId }?.uprightAspect() ?: 0f) }
+    var closing by remember { mutableStateOf(false) }
+    // How far a predictive back swipe has gone, and from which edge.
+    val back = remember { Animatable(0f) }
+    var backFromLeft by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        if (reveal.value < 1f) reveal.animateTo(1f, motion.defaultSpatialSpec())
+    }
+    val latestOnClose by rememberUpdatedState(onClose)
+    val latestBoundsOf by rememberUpdatedState(boundsOf)
+    fun close() {
+        if (closing) return
+        closing = true
+        scope.launch {
+            val current = latestItems.firstOrNull { it.id == currentId }
+            val target = current?.let { latestBoundsOf(it.id) }
+            val aspect = current?.uprightAspect() ?: 0f
+            if (target != null && aspect > 0f) {
+                anchor = target
+                anchorAspect = aspect
+                launch { back.animateTo(0f, motion.fastSpatialSpec()) }
+                reveal.animateTo(0f, motion.fastSpatialSpec())
+            }
+            latestOnClose()
+        }
+    }
+
+    // Android's predictive back: the viewer shrinks towards the swipe as it's dragged, then
+    // closes into the grid on release, or springs back if the swipe is cancelled.
+    PredictiveBackHandler { events ->
+        try {
+            events.collect { event ->
+                backFromLeft = event.swipeEdge == BackEventCompat.EDGE_LEFT
+                back.snapTo(event.progress)
+            }
+            close()
+        } catch (cancelled: CancellationException) {
+            scope.launch { back.animateTo(0f, motion.fastSpatialSpec()) }
+            throw cancelled
+        }
+    }
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
@@ -188,6 +240,7 @@ fun ViewerScreen(
     var dismissProgress by remember { mutableFloatStateOf(0f) }
     val dismissing by remember { derivedStateOf { dismissProgress > 0f } }
     val requests = rememberMediaRequests()
+    val haptics = LocalHapticFeedback.current
     var interactions by remember { mutableIntStateOf(0) }
     var draggingSeekBar by remember { mutableStateOf(false) }
     var videoZoomed by remember { mutableStateOf(false) }
@@ -221,12 +274,24 @@ fun ViewerScreen(
     DisposableEffect(activity) {
         onDispose { originalOrientation?.let { activity?.requestedOrientation = it } }
     }
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // Android 16 and later ignore orientation requests on tablets and unfolded foldables, so
+    // turning the screen is only offered on a phone-sized screen.
+    val canRotate = configuration.smallestScreenWidthDp < LARGE_SCREEN_DP
+    val density = LocalDensity.current
+    val revealCorner = with(density) { REVEAL_CORNER.toPx() }
+    val backShift = with(density) { BACK_SHIFT.toPx() }
+    val revealed by remember { derivedStateOf { reveal.value > 0.9f && !closing } }
+    val chromeVisible = controlsVisible && settledItem != null && !dismissing && revealed
 
     Box(
         Modifier
             .fillMaxSize()
-            .drawBehind { drawRect(Color.Black.copy(alpha = 1f - dismissProgress)) },
+            .drawBehind {
+                val shown = reveal.value.coerceIn(0f, 1f) * (1f - BACK_DIM * back.value)
+                drawRect(Color.Black.copy(alpha = (1f - dismissProgress) * shown))
+            },
     ) {
         HorizontalPager(
             state = pagerState,
@@ -234,8 +299,20 @@ fun ViewerScreen(
             beyondViewportPageCount = 1,
             // Swipes turn the page on videos too (holding first scrubs instead), except while a
             // video is zoomed in and a swipe moves the picture.
-            userScrollEnabled = !videoZoomed,
-            modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = !videoZoomed && !closing,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    applyRevealAndBack(
+                        reveal = reveal.value,
+                        anchor = anchor,
+                        aspect = anchorAspect,
+                        back = back.value,
+                        backFromLeft = backFromLeft,
+                        backShift = backShift,
+                        corner = revealCorner,
+                    )
+                },
         ) { page ->
             val item = latestItems[page]
             val onCurrentPage = page == pagerState.settledPage
@@ -271,16 +348,15 @@ fun ViewerScreen(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible && settledItem != null && !dismissing,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            visible = chromeVisible,
+            enter = fadeIn(motion.defaultEffectsSpec()),
+            exit = fadeOut(motion.fastEffectsSpec()),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
             settledItem?.let { item ->
                 ViewerTopBar(
                     item = item,
-                    onBack = onClose,
-                    onInfo = { detailsOpen = true },
+                    onBack = ::close,
                     // Offered while a video is paused on the frame to keep.
                     onSaveFrame = if (video != null && player != null && item.id == video.id && (!playback.playWhenReady || playback.ended)) {
                         {
@@ -297,34 +373,17 @@ fun ViewerScreen(
                     } else {
                         null
                     },
-                    // Animated GIFs would lose their animation, so they aren't edited.
-                    onEdit = if (item.mimeType != "image/gif") {
+                    onRotate = if (canRotate) {
                         {
-                            player?.pause()
-                            controlsVisible = true
-                            editing = item
+                            activity?.requestedOrientation = if (landscape) {
+                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            } else {
+                                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            }
+                            interactions++
                         }
                     } else {
                         null
-                    },
-                    // Only library items can be starred or trashed, not files other apps handed over.
-                    onFavorite = if (canChangeMedia && item.id != EXTERNAL_ITEM_ID) {
-                        { requests.favorite(listOf(item.uri), !item.isFavorite) }
-                    } else {
-                        null
-                    },
-                    onTrash = if (canChangeMedia && item.id != EXTERNAL_ITEM_ID) {
-                        { requests.trash(listOf(item.uri)) }
-                    } else {
-                        null
-                    },
-                    onRotate = {
-                        activity?.requestedOrientation = if (landscape) {
-                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        } else {
-                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                        }
-                        interactions++
                     },
                 )
             }
@@ -332,9 +391,9 @@ fun ViewerScreen(
 
         if (video != null && player != null && scrubber != null) {
             AnimatedVisibility(
-                visible = controlsVisible && !dismissing,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                visible = chromeVisible,
+                enter = fadeIn(motion.defaultEffectsSpec()) + scaleIn(motion.fastSpatialSpec(), initialScale = 0.8f),
+                exit = fadeOut(motion.fastEffectsSpec()) + scaleOut(motion.fastSpatialSpec(), targetScale = 0.8f),
                 modifier = Modifier.align(Alignment.Center),
             ) {
                 PlayPauseButton(
@@ -345,42 +404,91 @@ fun ViewerScreen(
                     },
                 )
             }
-            AnimatedVisibility(
-                visible = controlsVisible && !dismissing,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter),
-            ) {
-                VideoBottomBar(
-                    playback = playback,
-                    speed = speed,
-                    onSpeedChange = {
-                        speed = it
-                        interactions++
-                    },
-                    loop = loop,
-                    onLoopChange = { loop = it },
-                    onSeek = {
-                        val target = clampPosition(it, playback.durationMillis)
-                        // A drag along the bar previews like a scrub; a tap jumps straight there.
-                        scrubber.jumpTo(target)
-                    },
-                    onSeekStart = {
-                        draggingSeekBar = true
-                        scrubber.begin()
-                    },
-                    onSeekEnd = {
-                        draggingSeekBar = false
-                        scrubber.finish()
-                    },
-                    onInteraction = { interactions++ },
-                    modifier = Modifier.windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
-                    ),
-                )
-            }
-            if (!controlsVisible && !dismissing) {
+            if (!controlsVisible && !dismissing && revealed) {
                 HairlineProgress(playback, Modifier.align(Alignment.BottomCenter))
+            }
+        }
+
+        // The bottom: a video's seek bar and playback options, then the item's actions.
+        AnimatedVisibility(
+            visible = chromeVisible,
+            enter = fadeIn(motion.defaultEffectsSpec()) +
+                slideInVertically(motion.defaultSpatialSpec()) { it / 3 },
+            exit = fadeOut(motion.fastEffectsSpec()) +
+                slideOutVertically(motion.fastSpatialSpec()) { it / 3 },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))))
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+                    )
+                    .padding(bottom = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (video != null && player != null && scrubber != null) {
+                    VideoBottomBar(
+                        playback = playback,
+                        speed = speed,
+                        onSpeedChange = {
+                            speed = it
+                            interactions++
+                        },
+                        loop = loop,
+                        onLoopChange = { loop = it },
+                        onSeek = {
+                            val target = clampPosition(it, playback.durationMillis)
+                            // A drag along the bar previews like a scrub; a tap jumps straight there.
+                            scrubber.jumpTo(target)
+                        },
+                        onSeekStart = {
+                            draggingSeekBar = true
+                            scrubber.begin()
+                        },
+                        onSeekEnd = {
+                            draggingSeekBar = false
+                            scrubber.finish()
+                        },
+                        onInteraction = { interactions++ },
+                    )
+                }
+                settledItem?.let { item ->
+                    val canStar = canChangeMedia && item.id != EXTERNAL_ITEM_ID
+                    ViewerActionsToolbar(
+                        isFavorite = item.isFavorite,
+                        // Only library items can be starred or trashed, not files other apps handed over.
+                        onFavorite = if (canStar) {
+                            {
+                                haptics.performHapticFeedback(
+                                    if (item.isFavorite) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn,
+                                )
+                                requests.favorite(listOf(item.uri), !item.isFavorite)
+                                interactions++
+                            }
+                        } else {
+                            null
+                        },
+                        // Animated GIFs would lose their animation, so they aren't edited.
+                        onEdit = if (item.mimeType != "image/gif") {
+                            {
+                                player?.pause()
+                                controlsVisible = true
+                                editing = item
+                            }
+                        } else {
+                            null
+                        },
+                        onInfo = { detailsOpen = true },
+                        onTrash = if (canStar) {
+                            { requests.trash(listOf(item.uri)) }
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
             }
         }
 
@@ -413,133 +521,80 @@ private fun togglePlayback(player: Player) {
     }
 }
 
-@Composable
-private fun ViewerTopBar(
-    item: MediaItem,
-    onBack: () -> Unit,
-    onInfo: () -> Unit,
-    onSaveFrame: (() -> Unit)?,
-    onEdit: (() -> Unit)?,
-    onFavorite: (() -> Unit)?,
-    onTrash: (() -> Unit)?,
-    onRotate: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top))
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.viewer_back),
-                tint = Color.White,
-            )
-        }
-        Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
-            // The same date the grid sorts and groups by; the date taken is in the details.
-            val millis = (item.dateModifiedSeconds * 1000).takeIf { it > 0 } ?: item.dateTakenMillis
-            if (millis != null) {
-                Text(
-                    text = remember(millis) {
-                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                    maxLines = 1,
-                )
-            }
-            item.displayName?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.75f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        if (onSaveFrame != null) {
-            IconButton(onClick = onSaveFrame) {
-                Icon(
-                    ViewerIcons.PhotoCamera,
-                    contentDescription = stringResource(R.string.viewer_save_frame),
-                    tint = Color.White,
-                )
-            }
-        }
-        if (onFavorite != null) {
-            IconButton(onClick = onFavorite) {
-                Icon(
-                    if (item.isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                    contentDescription = stringResource(
-                        if (item.isFavorite) R.string.favorite_remove else R.string.favorite_add,
-                    ),
-                    tint = Color.White,
-                )
-            }
-        }
-        if (onTrash != null) {
-            IconButton(onClick = onTrash) {
-                Icon(
-                    Icons.Outlined.Delete,
-                    contentDescription = stringResource(R.string.viewer_delete),
-                    tint = Color.White,
-                )
-            }
-        }
-        ViewerMoreMenu(onEdit = onEdit, onInfo = onInfo, onRotate = onRotate)
-    }
+/** The upright shape of [this] item, width over height, or 0 when unknown. */
+private fun MediaItem.uprightAspect(): Float {
+    val (w, h) = uprightSize(width, height, orientationDegrees)
+    return if (w > 0 && h > 0) w.toFloat() / h else 0f
 }
 
 /**
- * The overflow button: the editor, the details sheet and turning the screen, used less often than
- * the buttons beside it, which leaves the date and name room on a phone held upright.
+ * Lays the pager out between its grid cell ([anchor], at [reveal] 0) and full screen ([reveal]
+ * 1): the photo is cropped to the cell's shape and scaled onto it, then opens out to its fitted
+ * size. A predictive back swipe ([back] 0 to 1) then shrinks it towards the swiping edge.
  */
-@Composable
-private fun ViewerMoreMenu(onEdit: (() -> Unit)?, onInfo: () -> Unit, onRotate: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }) {
-            Icon(
-                Icons.Filled.MoreVert,
-                contentDescription = stringResource(R.string.viewer_more),
-                tint = Color.White,
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (onEdit != null) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.viewer_edit)) },
-                    leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
-                    onClick = {
-                        open = false
-                        onEdit()
-                    },
-                )
-            }
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.viewer_info)) },
-                leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
-                onClick = {
-                    open = false
-                    onInfo()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.viewer_rotate)) },
-                leadingIcon = { Icon(ViewerIcons.ScreenRotation, contentDescription = null) },
-                onClick = {
-                    open = false
-                    onRotate()
-                },
-            )
-        }
+private fun GraphicsLayerScope.applyRevealAndBack(
+    reveal: Float,
+    anchor: Rect?,
+    aspect: Float,
+    back: Float,
+    backFromLeft: Boolean,
+    backShift: Float,
+    corner: Float,
+) {
+    val w = size.width
+    val h = size.height
+    if (w <= 0f || h <= 0f) return
+    val backScale = 1f - BACK_SHRINK * back
+    var scale = backScale
+    var tx = (if (backFromLeft) 1f else -1f) * backShift * back
+    var ty = 0f
+    var clipWidth = w
+    var clipHeight = h
+    var radius = corner * back * 2f
+    if (reveal < 1f && anchor != null && aspect > 0f) {
+        val t = reveal.coerceAtLeast(0f)
+        // The photo as it sits fitted on screen.
+        val fitW = if (w / h > aspect) h * aspect else w
+        val fitH = if (w / h > aspect) h else w / aspect
+        // The largest part of it with the cell's shape: what the grid's crop shows.
+        val cellAspect = anchor.width / anchor.height
+        val cropW = if (fitW / fitH > cellAspect) fitH * cellAspect else fitW
+        val cropH = if (fitW / fitH > cellAspect) fitH else fitW / cellAspect
+        clipWidth = lerp(cropW, fitW, t)
+        clipHeight = lerp(cropH, fitH, t)
+        scale *= lerp(anchor.width / cropW, 1f, t)
+        tx += lerp(anchor.center.x - w / 2f, 0f, t)
+        ty += lerp(anchor.center.y - h / 2f, 0f, t)
+        radius = corner * (1f - t) / scale.coerceAtLeast(0.01f)
+    }
+    scaleX = scale
+    scaleY = scale
+    translationX = tx
+    translationY = ty
+    if (clipWidth < w || clipHeight < h || radius > 0f) {
+        clip = true
+        shape = CenteredRoundRect(clipWidth, clipHeight, radius)
+    } else {
+        clip = false
     }
 }
+
+private fun lerp(start: Float, stop: Float, fraction: Float): Float = start + (stop - start) * fraction
+
+/** A rounded rectangle of a set size in the middle of whatever it clips. */
+private class CenteredRoundRect(val width: Float, val height: Float, val radius: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val left = (size.width - width) / 2f
+        val top = (size.height - height) / 2f
+        return Outline.Rounded(RoundRect(left, top, left + width, top + height, CornerRadius(radius)))
+    }
+}
+
+private const val LARGE_SCREEN_DP = 600
+private const val BACK_SHRINK = 0.1f
+private const val BACK_DIM = 0.35f
+private val BACK_SHIFT = 16.dp
+private val REVEAL_CORNER = 16.dp
 
 /**
  * Shows Ultra HDR photos (what a Pixel's camera saves) with their full brightness, like Photos,

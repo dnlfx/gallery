@@ -4,10 +4,13 @@ import android.content.Context
 import android.text.format.DateFormat
 import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +22,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
@@ -37,30 +42,34 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +80,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -100,7 +117,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaGridScreen(
     state: GridState,
@@ -113,12 +129,15 @@ fun MediaGridScreen(
     onOpenTrash: (() -> Unit)?,
     modifier: Modifier = Modifier,
     gridState: LazyGridState = rememberLazyGridState(),
+    /** Where each cell on screen is, so the viewer can open out of it and close back into it. */
+    cellBounds: CellBounds? = null,
 ) {
-    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
-    // The overlap changes on every frame of a scroll; only crossing the threshold matters, so the
-    // bar recomposes once when the grid slides under it rather than on every frame.
-    val scrolledUnder by remember(scrollBehavior) {
-        derivedStateOf { scrollBehavior.state.overlappedFraction > 0.01f }
+    // A large title that folds into a compact bar as the grid scrolls, like the system apps.
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Only crossing the threshold matters, so the bar recomposes once when the grid slides under
+    // it rather than on every frame of a scroll.
+    val scrolledUnder by remember(gridState) {
+        derivedStateOf { gridState.firstVisibleItemIndex > 0 || gridState.firstVisibleItemScrollOffset > 0 }
     }
     val resources = LocalContext.current.resources
     val scope = rememberCoroutineScope()
@@ -136,6 +155,10 @@ fun MediaGridScreen(
     }
     val selecting = selection.isNotEmpty()
     BackHandler(enabled = selecting) { selection = emptySet() }
+    // The bar recomposes on every frame of its colour change; walk the library once.
+    val selectedItems = remember(shown, selection) {
+        if (selection.isEmpty()) emptyList() else shown.orEmpty().filter { it.id in selection }
+    }
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         // Keep thumbnails and the fast scroller clear of the camera cutout and of the navigation
@@ -150,75 +173,73 @@ fun MediaGridScreen(
                 } else {
                     MaterialTheme.colorScheme.surface
                 },
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
                 label = "barColor",
+            )
+            val colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = barColor,
+                scrolledContainerColor = barColor,
             )
             Column(Modifier.background(barColor)) {
                 if (selecting) {
-                    // The bar recomposes on every frame of its colour change; walk the library once.
-                    val selectedItems = remember(shown, selection) { shown.orEmpty().filter { it.id in selection } }
-                    SelectionTopBar(
-                        count = selection.size,
-                        allFavorite = selectedItems.isNotEmpty() && selectedItems.all { it.isFavorite },
-                        onClear = { selection = emptySet() },
-                        onFavorite = if (canChangeMedia) {
-                            { favorite ->
-                                requests.favorite(selectedItems.map { it.uri }, favorite) { selection = emptySet() }
+                    val count = selection.size
+                    LargeFlexibleTopAppBar(
+                        navigationIcon = {
+                            IconButton(onClick = { selection = emptySet() }) {
+                                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.selection_clear))
                             }
-                        } else {
-                            null
                         },
-                        onTrash = if (canChangeMedia) {
-                            { requests.trash(selectedItems.map { it.uri }) { selection = emptySet() } }
-                        } else {
-                            null
+                        title = {
+                            Text(
+                                resources.getQuantityString(
+                                    R.plurals.selected_count,
+                                    count,
+                                    NumberFormat.getIntegerInstance().format(count),
+                                ),
+                                maxLines = 1,
+                            )
                         },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = barColor,
-                            scrolledContainerColor = barColor,
-                        ),
+                        colors = colors,
                         scrollBehavior = scrollBehavior,
                     )
-                } else TopAppBar(
-                    title = {
-                        Column {
-                            Text(stringResource(R.string.app_name))
-                            if (state is GridState.Loaded && state.items.isNotEmpty()) {
-                                val count = state.items.size
+                } else {
+                    val loaded = state as? GridState.Loaded
+                    LargeFlexibleTopAppBar(
+                        title = { Text(stringResource(R.string.app_name), maxLines = 1) },
+                        subtitle = {
+                            if (loaded != null && loaded.items.isNotEmpty()) {
+                                val count = loaded.items.size
                                 Text(
                                     text = resources.getQuantityString(
                                         R.plurals.item_count,
                                         count,
                                         NumberFormat.getIntegerInstance().format(count),
                                     ),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
                                 )
                             }
-                        }
-                    },
-                    actions = {
-                        if (state is GridState.Loaded && state.allItems.isNotEmpty()) {
-                            SortMenu(
-                                sort = state.sort,
-                                onSelect = { sort ->
-                                    scope.launch { gridState.scrollToItem(0) }
-                                    onSortSelected(sort)
-                                },
-                            )
-                        }
-                        if (onOpenTrash != null) MoreMenu(onOpenTrash)
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = barColor,
-                        scrolledContainerColor = barColor,
-                    ),
-                    scrollBehavior = scrollBehavior,
-                )
+                        },
+                        actions = {
+                            if (loaded != null && loaded.allItems.isNotEmpty()) {
+                                SortMenu(
+                                    sort = loaded.sort,
+                                    onSelect = { sort ->
+                                        scope.launch { gridState.scrollToItem(0) }
+                                        onSortSelected(sort)
+                                    },
+                                )
+                            }
+                            if (onOpenTrash != null) MoreMenu(onOpenTrash)
+                        },
+                        colors = colors,
+                        scrollBehavior = scrollBehavior,
+                    )
+                }
                 if (state is GridState.Loaded && state.allItems.isNotEmpty()) {
                     FilterRow(
                         filters = state.filters,
                         selected = state.filter,
+                        enabled = !selecting,
                         onSelect = { filter ->
                             // A new filter starts from the newest item, not partway down the old list.
                             scope.launch { gridState.scrollToItem(0) }
@@ -231,43 +252,58 @@ fun MediaGridScreen(
     ) { padding ->
         when (state) {
             GridState.Loading -> Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
-                CircularProgressIndicator()
+                LoadingIndicator(Modifier.size(64.dp))
             }
             is GridState.Loaded -> if (state.items.isEmpty() && !limitedAccess) {
-                Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) {
-                    Text(
-                        stringResource(
-                            if (state.filter == MediaFilter.ALL) R.string.empty_library else R.string.empty_filter,
-                        ),
-                    )
-                }
+                EmptyState(
+                    title = stringResource(
+                        if (state.filter == MediaFilter.ALL) R.string.empty_library else R.string.empty_filter,
+                    ),
+                    body = if (state.filter == MediaFilter.ALL) stringResource(R.string.empty_library_body) else null,
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                )
             } else {
                 val media = state.items
                 val entries = state.sections.entries
                 val bannerCount = if (limitedAccess) 1 else 0
                 val sort = state.sort
                 val context = LocalContext.current
+                val haptics = LocalHapticFeedback.current
                 val monthFormat = remember {
                     val locale = Locale.getDefault()
                     SimpleDateFormat(DateFormat.getBestDateTimePattern(locale, "MMMMyyyy"), locale)
                 }
                 val level = rememberGridLevel()
                 val ids = remember(media) { media.map { it.id } }
+                // Room under the last row for the floating toolbar while selecting.
+                val layoutDirection = LocalLayoutDirection.current
+                val gridPadding = remember(padding, selecting, layoutDirection) {
+                    PaddingValues(
+                        start = padding.calculateStartPadding(layoutDirection),
+                        top = padding.calculateTopPadding(),
+                        end = padding.calculateEndPadding(layoutDirection),
+                        bottom = padding.calculateBottomPadding() + if (selecting) TOOLBAR_CLEARANCE else 0.dp,
+                    )
+                }
                 val dragToSelect = rememberDragToSelect(
                     gridState = gridState,
                     ids = ids,
                     selected = selection,
                     onSelectedChange = { selection = it },
-                    contentPadding = padding,
+                    contentPadding = gridPadding,
                 )
-                Box(Modifier.fillMaxSize().pinchToResize(level)) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pinchToResize(level) { haptics.performHapticFeedback(HapticFeedbackType.SegmentTick) },
+                ) {
                     LazyVerticalGrid(
                         state = gridState,
                         // Four columns on a phone held upright by default; pinch for 3, 6 or 8.
                         columns = gridCellsFor(level.intValue),
-                        contentPadding = padding,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        contentPadding = gridPadding,
+                        horizontalArrangement = Arrangement.spacedBy(CELL_GAP),
+                        verticalArrangement = Arrangement.spacedBy(CELL_GAP),
                         modifier = Modifier.fillMaxSize().then(dragToSelect),
                     ) {
                         if (limitedAccess) {
@@ -291,6 +327,8 @@ fun MediaGridScreen(
                             when (val entry = entries[index]) {
                                 is GridEntry.Header -> MonthHeader(
                                     remember(entry.month) { monthFormat.format(Date(entry.millis)) },
+                                    // Slides into place when a pinch changes the columns.
+                                    Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null),
                                 )
                                 is GridEntry.Media -> {
                                     val item = media[entry.mediaIndex]
@@ -307,6 +345,8 @@ fun MediaGridScreen(
                                         selecting = selecting,
                                         selected = selected,
                                         onSelect = { selection = selection + item.id },
+                                        bounds = cellBounds,
+                                        modifier = Modifier.animateItem(fadeInSpec = null),
                                     )
                                 }
                             }
@@ -328,7 +368,26 @@ fun MediaGridScreen(
                                 null -> null
                             }
                         },
-                        contentPadding = padding,
+                        contentPadding = gridPadding,
+                    )
+                    SelectionToolbar(
+                        visible = selecting,
+                        allFavorite = selectedItems.isNotEmpty() && selectedItems.all { it.isFavorite },
+                        onFavorite = if (canChangeMedia) {
+                            { favorite ->
+                                requests.favorite(selectedItems.map { it.uri }, favorite) { selection = emptySet() }
+                            }
+                        } else {
+                            null
+                        },
+                        onTrash = if (canChangeMedia) {
+                            { requests.trash(selectedItems.map { it.uri }) { selection = emptySet() } }
+                        } else {
+                            null
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = padding.calculateBottomPadding()),
                     )
                 }
             }
@@ -336,34 +395,26 @@ fun MediaGridScreen(
     }
 }
 
-/** The app bar while items are selected: how many, and what can be done to all of them. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** What can be done to every selected item, floating over the bottom of the grid. */
 @Composable
-private fun SelectionTopBar(
-    count: Int,
+private fun SelectionToolbar(
+    visible: Boolean,
     allFavorite: Boolean,
-    onClear: () -> Unit,
     onFavorite: ((favorite: Boolean) -> Unit)?,
     onTrash: (() -> Unit)?,
-    colors: TopAppBarColors,
-    scrollBehavior: TopAppBarScrollBehavior,
+    modifier: Modifier = Modifier,
 ) {
-    TopAppBar(
-        navigationIcon = {
-            IconButton(onClick = onClear) {
-                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.selection_clear))
-            }
-        },
-        title = {
-            Text(
-                LocalContext.current.resources.getQuantityString(
-                    R.plurals.selected_count,
-                    count,
-                    NumberFormat.getIntegerInstance().format(count),
-                ),
-            )
-        },
-        actions = {
+    if (onFavorite == null && onTrash == null) return
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it } + fadeIn(),
+        exit = slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it } + fadeOut(),
+        modifier = modifier.padding(bottom = 16.dp),
+    ) {
+        HorizontalFloatingToolbar(
+            expanded = true,
+            colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(),
+        ) {
             if (onFavorite != null) {
                 // Stars them all, or unstars them when every one is already starred.
                 IconButton(onClick = { onFavorite(!allFavorite) }) {
@@ -380,10 +431,48 @@ private fun SelectionTopBar(
                     Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.viewer_delete))
                 }
             }
-        },
-        colors = colors,
-        scrollBehavior = scrollBehavior,
-    )
+        }
+    }
+}
+
+/** A friendly empty screen: a soft shape with a photo glyph, a title and an optional line. */
+@Composable
+internal fun EmptyState(title: String, body: String?, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(112.dp)
+                .clip(MaterialShapes.Cookie9Sided.toShape())
+                .background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                GridIcons.Photo,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.size(44.dp),
+            )
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLargeEmphasized,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (body != null) {
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }
 
 /** The overflow button in the app bar. For now it only leads to the trash. */
@@ -447,36 +536,56 @@ private fun SortMenuItem(label: String, checked: Boolean, onClick: () -> Unit) {
 
 /** One chip per filter, scrolling sideways. All is first and starts selected. */
 @Composable
-private fun FilterRow(filters: List<MediaFilter>, selected: MediaFilter, onSelect: (MediaFilter) -> Unit) {
+private fun FilterRow(
+    filters: List<MediaFilter>,
+    selected: MediaFilter,
+    enabled: Boolean,
+    onSelect: (MediaFilter) -> Unit,
+) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-            .padding(bottom = 4.dp),
+            .padding(bottom = 8.dp),
     ) {
         items(filters, key = { it.name }) { filter ->
             val isSelected = filter == selected
             FilterChip(
                 selected = isSelected,
+                enabled = enabled,
                 // Tapping the selected filter again goes back to everything.
                 onClick = { onSelect(if (isSelected) MediaFilter.ALL else filter) },
                 label = { Text(stringResource(filter.label)) },
+                leadingIcon = if (isSelected) {
+                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                } else {
+                    null
+                },
+                shape = CircleShape,
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ),
+                border = null,
+                modifier = Modifier.animateItem(),
             )
         }
     }
 }
 
 @Composable
-private fun MonthHeader(label: String) {
+private fun MonthHeader(label: String, modifier: Modifier = Modifier) {
     Text(
         text = label,
-        style = MaterialTheme.typography.titleSmall,
+        style = MaterialTheme.typography.titleMediumEmphasized,
         color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, top = 20.dp, bottom = 8.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 10.dp)
             .semantics { heading() },
     )
 }
@@ -494,6 +603,8 @@ internal fun MediaCell(
     selected: Boolean = false,
     onSelect: (() -> Unit)? = null,
     label: String? = null,
+    bounds: CellBounds? = null,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val request = remember(item.uri, item.dateModifiedSeconds) {
@@ -503,12 +614,22 @@ internal fun MediaCell(
             .crossfade(CROSSFADE_MILLIS)
             .build()
     }
-    val inset by animateDpAsState(if (selected) SELECTED_INSET else 0.dp, label = "inset")
-    val corner by animateDpAsState(if (selected) SELECTED_CORNER else 0.dp, label = "corner")
+    // One springy value drives both the inset and the corners of a selected cell.
+    val selectedFraction by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "selected",
+    )
+    val inset = SELECTED_INSET * selectedFraction
+    val corner = SELECTED_CORNER * selectedFraction
     val selectLabel = stringResource(R.string.cell_select)
+    if (bounds != null) {
+        DisposableEffect(bounds, item.id) { onDispose { bounds.drop(item.id) } }
+    }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
+            .then(if (bounds != null) Modifier.onPlaced { bounds.place(item.id, it) } else Modifier)
             .background(
                 if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
             )
@@ -541,6 +662,18 @@ internal fun MediaCell(
                 .padding(inset)
                 .clip(RoundedCornerShape(corner)),
         )
+        if (item.isFavorite && label == null) {
+            Icon(
+                Icons.Filled.Favorite,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(inset)
+                    .padding(5.dp)
+                    .size(14.dp),
+            )
+        }
         if (item.type == MediaType.VIDEO) {
             CellLabel(
                 text = item.durationMillis?.let(::formatDuration) ?: "",
@@ -574,14 +707,20 @@ private fun CellLabel(text: String, modifier: Modifier) {
 @Composable
 private fun SelectionMark(selected: Boolean, modifier: Modifier) {
     if (selected) {
-        Icon(
-            Icons.Filled.CheckCircle,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = modifier
+        Box(
+            modifier
                 .size(24.dp)
-                .background(MaterialTheme.colorScheme.surface, CircleShape),
-        )
+                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     } else {
         Box(
             modifier
@@ -594,7 +733,11 @@ private fun SelectionMark(selected: Boolean, modifier: Modifier) {
 }
 
 private val SELECTED_INSET = 10.dp
-private val SELECTED_CORNER = 12.dp
+private val SELECTED_CORNER = 16.dp
+private val CELL_GAP = 2.dp
+
+/** Space the floating selection toolbar needs above the bottom inset: its height plus margins. */
+private val TOOLBAR_CLEARANCE = 96.dp
 
 /** What TalkBack reads for a cell: "Photo, 1 October 2026" or "Video, 0:32, 1 October 2026". */
 private fun mediaDescription(context: Context, item: MediaItem): String {
@@ -617,10 +760,12 @@ private fun LimitedAccessBanner(onRequestFullAccess: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
             text = stringResource(R.string.limited_access_body),
@@ -628,6 +773,34 @@ private fun LimitedAccessBanner(onRequestFullAccess: () -> Unit) {
             color = MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onRequestFullAccess) { Text(stringResource(R.string.limited_access_action)) }
+        FilledTonalButton(
+            onClick = onRequestFullAccess,
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+        ) { Text(stringResource(R.string.limited_access_action)) }
     }
+}
+
+/**
+ * Where each grid cell on screen sits, kept up to date as cells are placed. Opening the viewer
+ * grows the photo out of its cell, and closing it shrinks the photo back into the one it lands on.
+ * Plain fields, not state: nothing redraws when a cell moves.
+ */
+@Stable
+class CellBounds {
+    private val placed = HashMap<Long, LayoutCoordinates>()
+
+    internal fun place(id: Long, coordinates: LayoutCoordinates) {
+        placed[id] = coordinates
+    }
+
+    internal fun drop(id: Long) {
+        placed.remove(id)
+    }
+
+    /** The cell's bounds on screen, or null when it isn't on screen. */
+    fun boundsOf(id: Long): Rect? =
+        placed[id]?.takeIf { it.isAttached }?.boundsInRoot()?.takeIf { it.width > 0f && it.height > 0f }
 }

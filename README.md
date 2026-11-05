@@ -4,7 +4,8 @@ An Android gallery for Pixel phones that works like the iPhone Photos app: every
 video on the device in one grid, sorted by last modified (newest first), with no splitting
 into Camera, Movies, Downloads and so on.
 
-Built with Kotlin, Jetpack Compose and Coil. Minimum Android 10, targets Android 15.
+Built with Kotlin, Jetpack Compose (Material 3 Expressive) and Coil. Minimum Android 10, targets
+Android 17.
 
 ## Install
 

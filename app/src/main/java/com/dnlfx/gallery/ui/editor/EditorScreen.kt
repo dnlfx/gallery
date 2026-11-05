@@ -39,13 +39,14 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -64,7 +65,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import com.dnlfx.gallery.ui.theme.ViewerColors
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -558,8 +564,19 @@ private fun EditorContent(
                 Icon(ViewerIcons.Undo, contentDescription = stringResource(R.string.editor_undo))
             }
             CompareButton(onComparingChange = { comparing = it })
-            TextButton(onClick = onSave, enabled = canSave && saving.job == null, colors = buttonColors) {
-                Text(saveLabel)
+            Button(
+                onClick = onSave,
+                enabled = canSave && saving.job == null,
+                shapes = ButtonDefaults.shapes(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black,
+                    disabledContainerColor = Color.White.copy(alpha = 0.12f),
+                    disabledContentColor = Color.White.copy(alpha = 0.38f),
+                ),
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp),
+            ) {
+                Text(saveLabel, style = MaterialTheme.typography.labelLarge)
             }
         }
 
@@ -634,15 +651,35 @@ private fun EditorContent(
             horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            for (each in tools) {
-                val selected = each == tool
-                TextButton(
-                    onClick = { tool = each },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.75f),
-                    ),
-                ) {
-                    Text(stringResource(each.label), style = MaterialTheme.typography.labelLarge)
+            // The tools as one segmented pill; the chosen one is solid white.
+            Row(
+                Modifier
+                    .clip(CircleShape)
+                    .background(ViewerColors.Glass)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (each in tools) {
+                    val selected = each == tool
+                    val fill by animateColorAsState(
+                        targetValue = if (selected) Color.White else Color.Transparent,
+                        animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
+                        label = "toolFill",
+                    )
+                    Box(
+                        Modifier
+                            .clip(CircleShape)
+                            .background(fill)
+                            .selectable(selected = selected, role = Role.Tab, onClick = { tool = each })
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(each.label),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (selected) Color.Black else ViewerColors.OnGlassMuted,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(8.dp))
@@ -666,9 +703,9 @@ private fun EditorContent(
             text = {
                 val progress = saving.progress
                 if (progress != null) {
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    LinearWavyProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 } else {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    LinearWavyProgressIndicator(Modifier.fillMaxWidth())
                 }
             },
             confirmButton = {},
@@ -777,7 +814,7 @@ private fun CropTools(history: EditHistory, frameAspect: Float, detecting: Boole
             }) { Icon(ViewerIcons.Flip, contentDescription = null, modifier = Modifier.rotate(90f)) }
             ToolButton(R.string.editor_auto_fit, enabled = ready && !detecting, onClick = onAutoFit) {
                 if (detecting) {
-                    CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    LoadingIndicator(Modifier.size(24.dp), color = Color.White)
                 } else {
                     Icon(ViewerIcons.AutoFix, contentDescription = null)
                 }

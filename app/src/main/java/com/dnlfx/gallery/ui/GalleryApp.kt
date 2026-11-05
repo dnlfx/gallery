@@ -6,6 +6,11 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -35,6 +41,7 @@ import com.dnlfx.gallery.R
 import com.dnlfx.gallery.data.MediaItem
 import com.dnlfx.gallery.data.externalMediaItem
 import com.dnlfx.gallery.data.mediaStoreId
+import com.dnlfx.gallery.ui.grid.CellBounds
 import com.dnlfx.gallery.ui.grid.GridState
 import com.dnlfx.gallery.ui.grid.GridViewModel
 import com.dnlfx.gallery.ui.grid.MediaGridScreen
@@ -90,6 +97,9 @@ fun GalleryApp(
     val gridState = rememberLazyGridState()
     var viewerItemId by rememberSaveable { mutableStateOf<Long?>(null) }
     var trashOpen by rememberSaveable { mutableStateOf(false) }
+    val cellBounds = remember { CellBounds() }
+    // The cell the viewer grew out of. Not saved: after a restart the viewer simply appears.
+    var openedFrom by remember { mutableStateOf<Rect?>(null) }
 
     if (access == MediaAccess.NONE) {
         PermissionScreen(
@@ -114,14 +124,23 @@ fun GalleryApp(
             state = state,
             limitedAccess = limitedAccess,
             onRequestFullAccess = { launcher.launch(MediaPermissions.requested) },
-            onItemClick = { _, item -> viewerItemId = item.id },
+            onItemClick = { _, item ->
+                openedFrom = cellBounds.boundsOf(item.id)
+                viewerItemId = item.id
+            },
             onFilterSelected = viewModel::onFilterSelected,
             onSortSelected = viewModel::onSortSelected,
             onOpenTrash = if (canChangeMedia) { { trashOpen = true } } else null,
             gridState = gridState,
+            cellBounds = cellBounds,
             modifier = if (viewerOpen || coveredByTrash) hiddenFromScreenReaders else Modifier,
         )
-        if (coveredByTrash) {
+        // The trash slides in over the grid from the side, the way a new page does.
+        AnimatedVisibility(
+            visible = coveredByTrash,
+            enter = slideInHorizontally(MaterialTheme.motionScheme.defaultSpatialSpec()) { it / 4 } + fadeIn(),
+            exit = slideOutHorizontally(MaterialTheme.motionScheme.fastSpatialSpec()) { it / 4 } + fadeOut(),
+        ) {
             val trash by viewModel.trash.collectAsStateWithLifecycle()
             TrashScreen(items = trash, onClose = { trashOpen = false })
         }
@@ -130,7 +149,12 @@ fun GalleryApp(
                 items = items,
                 startItemId = openItemId,
                 onCurrentItemChange = { viewerItemId = it },
-                onClose = { viewerItemId = null },
+                onClose = {
+                    viewerItemId = null
+                    openedFrom = null
+                },
+                openFrom = openedFrom,
+                boundsOf = cellBounds::boundsOf,
             )
         }
     }
